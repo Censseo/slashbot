@@ -16,7 +16,7 @@ import type { ApprovalRequest } from '../core/kernel/approval-bridge.js';
 import type { SubagentTask } from '../plugins/services/subagent-manager.js';
 import type { AgentLoopDisplayState } from './agent-activity.js';
 import type { ChatLine } from './palette.js';
-import { VoltAgentAdapter } from '../core/voltagent/index.js';
+import { KernelLlmAdapter } from '../core/agentic/llm/index.js';
 import { loadHistory } from '../core/history.js';
 import type { AgentRegistry } from '../plugins/agents/index.js';
 
@@ -72,8 +72,6 @@ export const CONTEXT_BYPASS_PREFIXES = new Set([
   'date',
   'whoami',
 ]);
-
-export const BUSY_CHAR = '\u25D0';
 
 export const initialAgentState: AgentLoopDisplayState = { title: '', thoughts: '', actions: [], summary: '', done: false };
 
@@ -202,7 +200,7 @@ export function useTuiState(kernel: SlashbotKernel, requireOnboarding?: boolean)
     const providers = kernel.services.get<ProviderRegistry>('kernel.providers.registry');
     const logger = kernel.services.get<StructuredLogger>('kernel.logger') ?? kernel.logger;
     if (!authRouter || !providers) return null;
-    return new VoltAgentAdapter(
+    return new KernelLlmAdapter(
       authRouter,
       providers,
       logger,

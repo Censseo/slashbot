@@ -19,7 +19,7 @@ import type { ChannelRegistry, ProviderRegistry } from '@slashbot/core/kernel/re
 import type { SlashbotKernel } from '@slashbot/core/kernel/kernel.js';
 import type { AuthProfileRouter } from '@slashbot/core/providers/auth-router.js';
 import type { TokenModeProxyAuthService } from '@slashbot/core/agentic/llm/types.js';
-import { VoltAgentAdapter } from '@slashbot/core/voltagent/index.js';
+import { KernelLlmAdapter } from '@slashbot/core/agentic/llm/index.js';
 import { SubagentManager } from '../services/subagent-manager.js';
 import { commandExists, executeCommandSafely } from '@slashbot/core/kernel/safe-command.js';
 
@@ -428,7 +428,7 @@ export function createAgenticToolsPlugin(): SlashbotPlugin {
         const providers = context.getService<ProviderRegistry>('kernel.providers.registry');
         const logger = context.getService<StructuredLogger>('kernel.logger');
         if (!kernel || !authRouter || !providers || !logger) return undefined;
-        const llm = new VoltAgentAdapter(
+        const llm = new KernelLlmAdapter(
           authRouter,
           providers,
           logger,

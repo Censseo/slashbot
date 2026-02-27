@@ -18,8 +18,6 @@ interface CooldownEntry {
 interface SessionState {
   stickyProfiles: Map<string, string>;
   cooldowns: Map<string, CooldownEntry>;
-  /** Provider-level cooldowns for org-wide rate limits. */
-  providerCooldowns: Map<string, CooldownEntry>;
 }
 
 export interface ResolveAuthRequest {
@@ -174,7 +172,6 @@ export class AuthProfileRouter {
       this.sessions.set(sessionId, {
         stickyProfiles: new Map(),
         cooldowns: new Map(),
-        providerCooldowns: new Map(),
       });
     }
 
@@ -207,34 +204,6 @@ export class AuthProfileRouter {
       cooldownUntilMs: Date.now() + backoffMs,
       failureCount,
     });
-  }
-
-  /** Cool down an entire provider (org-level rate limit). */
-  reportProviderRateLimit(sessionId: string, providerId: string): void {
-    const state = this.getSessionState(sessionId);
-    const existing = state.providerCooldowns.get(providerId);
-    const failureCount = (existing?.failureCount ?? 0) + 1;
-    // Rate-limit backoff: 60s → 120s → 240s, capped at 5 min
-    const backoffMs = Math.min(60_000 * Math.pow(2, failureCount - 1), 5 * 60_000);
-    state.providerCooldowns.set(providerId, {
-      cooldownUntilMs: Date.now() + backoffMs,
-      failureCount,
-    });
-    this.logger.warn('Provider rate-limited, applying cooldown', {
-      providerId,
-      backoffMs,
-      failureCount,
-    });
-  }
-
-  private isProviderCoolingDown(session: SessionState, providerId: string): boolean {
-    const entry = session.providerCooldowns.get(providerId);
-    if (!entry) return false;
-    if (Date.now() >= entry.cooldownUntilMs) {
-      session.providerCooldowns.delete(providerId);
-      return false;
-    }
-    return true;
   }
 
   private async refreshIfNeeded(agentId: string, provider: ProviderDefinition, profile: AuthProfile): Promise<AuthProfile> {
@@ -271,10 +240,6 @@ export class AuthProfileRouter {
     const provider = this.providers.get(providerId);
     if (!provider) {
       throw new Error(`Provider "${providerId}" is not registered.`);
-    }
-
-    if (this.isProviderCoolingDown(sessionState, providerId)) {
-      throw new Error(`Provider "${providerId}" is rate-limited. Try again later.`);
     }
 
     const modelId = active?.modelId ?? provider.models[0]?.id ?? providerId;

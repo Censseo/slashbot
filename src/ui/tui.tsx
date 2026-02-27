@@ -15,7 +15,8 @@ import { Separator } from './separator.js';
 import { InputRow } from './input-row.js';
 import { MessageList } from './tui-message-list.js';
 import { SpawnRunner, ApprovalPrompt } from './tui-spawn.js';
-import { type SlashbotTuiProps, BUSY_CHAR, useTuiState } from './tui-state.js';
+import { type SlashbotTuiProps, useTuiState } from './tui-state.js';
+import { useSpinner } from './use-spinner.js';
 import {
   useBridgeRegistration,
   useCliChannel,
@@ -41,8 +42,7 @@ export function SlashbotTui(props: SlashbotTuiProps): React.ReactElement {
     prompt, setPrompt,
     busy,
     needsOnboarding, setNeedsOnboarding,
-    agentState,
-    connectorAgentState, connectorAgentBusy, connectorDisplayLabel,
+    connectorAgentBusy,
     lines,
     activeSpawns, removeSpawnRequest,
     activeApproval, dequeueApprovalRequest,
@@ -74,6 +74,7 @@ export function SlashbotTui(props: SlashbotTuiProps): React.ReactElement {
   const contentViewportRows = Math.max(1, rows - reservedRows);
   const contentMinHeight = Math.max(1, Math.floor(contentViewportRows * 0.6));
   const anyAgentBusy = busy || connectorAgentBusy;
+  const spinnerChar = useSpinner(anyAgentBusy);
 
   // ── Render ─────────────────────────────────────────────────────────
   return (
@@ -106,11 +107,6 @@ export function SlashbotTui(props: SlashbotTuiProps): React.ReactElement {
           ) : (
             <MessageList
               lines={lines}
-              agentState={agentState}
-              busy={busy}
-              connectorAgentState={connectorAgentState}
-              connectorAgentBusy={connectorAgentBusy}
-              connectorDisplayLabel={connectorDisplayLabel}
               paletteOpen={paletteOpen}
               filteredCommands={filteredCommands}
               paletteIndex={paletteIndex}
@@ -130,10 +126,7 @@ export function SlashbotTui(props: SlashbotTuiProps): React.ReactElement {
           <>
             <Box height={1} width={panelWidth}>
               {anyAgentBusy ? (
-                <>
-                  <Text color={palette.accent}>{'  '}</Text>
-                  <Text color={palette.accent}>{BUSY_CHAR}</Text>
-                </>
+                <Text color={palette.accent}>{'  '}{spinnerChar}</Text>
               ) : (
                 <Text>{' '}</Text>
               )}

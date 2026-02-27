@@ -18,7 +18,7 @@ import type { SlashbotKernel } from '@slashbot/core/kernel/kernel.js';
 import type { EventBus } from '@slashbot/core/kernel/event-bus.js';
 import type { ProviderRegistry } from '@slashbot/core/kernel/registries.js';
 import type { LlmAdapter, TokenModeProxyAuthService } from '@slashbot/core/agentic/llm/index.js';
-import { VoltAgentAdapter } from '@slashbot/core/voltagent/index.js';
+import { KernelLlmAdapter } from '@slashbot/core/agentic/llm/index.js';
 import type { AuthProfileRouter } from '@slashbot/core/providers/auth-router.js';
 
 /**
@@ -190,13 +190,13 @@ export function resolveCommonServices(context: PluginRegistrationContext): Commo
 }
 
 /**
- * Create a VoltAgentAdapter LLM instance from the standard kernel services.
+ * Create a KernelLlmAdapter LLM instance from the standard kernel services.
  *
  * Returns `null` if the required services (authRouter, providers, kernel) are unavailable.
  *
  * @param context - The plugin registration context.
  * @param services - Optional pre-resolved common services (avoids duplicate lookups).
- * @returns A VoltAgentAdapter instance or null.
+ * @returns A KernelLlmAdapter instance or null.
  */
 export function createLlmAdapter(
   context: PluginRegistrationContext,
@@ -204,7 +204,7 @@ export function createLlmAdapter(
 ): LlmAdapter | null {
   const { kernel, authRouter, providers, logger } = services ?? resolveCommonServices(context);
   if (!authRouter || !providers || !kernel) return null;
-  return new VoltAgentAdapter(
+  return new KernelLlmAdapter(
     authRouter,
     providers,
     logger,

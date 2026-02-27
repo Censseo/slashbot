@@ -34,7 +34,6 @@ const ProviderConfigEntrySchema = z.object({
   type: z.enum(['openai-compatible']).optional(),
   baseUrl: z.string().optional(),
   config: z.object({
-    temperature: z.number().optional(),
     maxTokens: z.number().int().optional(),
     contextLimit: z.number().int().optional(),
   }).optional(),

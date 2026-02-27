@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { VoltAgentAdapter } from '@slashbot/core/voltagent/index';
+import { KernelLlmAdapter } from '@slashbot/core/agentic/llm/index';
 import type { LlmAdapter, TokenModeProxyAuthService } from '@slashbot/core/agentic/llm/index';
 import type { JsonValue, PathResolver, SlashbotPlugin, StructuredLogger } from '../../plugin-sdk';
 import type { SlashbotKernel } from '@slashbot/core/kernel/kernel';
@@ -83,7 +83,7 @@ export function createTelegramPlugin(): SlashbotPlugin {
 
       // ── LLM adapters & agent sessions ───────────────────────────────
 
-      const llm = new VoltAgentAdapter(
+      const llm = new KernelLlmAdapter(
         authRouter,
         providers,
         logger,

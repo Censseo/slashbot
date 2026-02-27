@@ -195,8 +195,6 @@ export type TokenModeProxyResolver = TokenModeProxyAuthService | (() => TokenMod
 
 /** Configuration for a completion request to a specific provider. */
 export interface CompletionConfig {
-  /** Sampling temperature (0 = deterministic, higher = more random). */
-  temperature: number;
   /** Maximum output tokens for the response. */
   maxTokens: number;
   /** Timeout in milliseconds for the completion request. */

@@ -3,8 +3,7 @@
  *
  * Unified completion logic for both streaming and non-streaming LLM calls.
  * Provides an abstraction layer ({@link SdkCaller}) over the AI SDK's
- * generateText/streamText, with multi-provider failover, rate-limit handling,
- * image content fallback, and token-mode proxy support.
+ * generateText/streamText, with token-mode proxy support.
  *
  * @see {@link runCompletion} — Main entry point for running a completion
  * @see {@link makeStreamCaller} — Factory for streaming callers
@@ -25,7 +24,6 @@ import {
   getRequestBodyText,
   hasImageContent,
   isAbortError,
-  isRateLimitError,
   mapMessages,
 } from './helpers.js';
 import { getProviderConfig, getProviderFactory } from './provider-registry.js';
@@ -41,7 +39,7 @@ import { getProviderConfig, getProviderFactory } from './provider-registry.js';
 export type SdkCaller = (
   model: unknown,
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: AgentMessageContent | string }>,
-  config: { temperature?: number; maxTokens: number },
+  config: { maxTokens: number },
   abortSignal: AbortSignal,
 ) => Promise<string>;
 
@@ -49,7 +47,6 @@ export type SdkCaller = (
 export const generateCaller: SdkCaller = async (model, messages, config, abortSignal) => {
   const { text } = await generateText({
     model: model as Parameters<typeof generateText>[0]['model'],
-    ...(config.temperature != null ? { temperature: config.temperature } : {}),
     maxOutputTokens: config.maxTokens,
     maxRetries: 0,
     messages: messages as never,
@@ -63,7 +60,6 @@ export function makeStreamCaller(callback: StreamingCallback): SdkCaller {
   return async (model, messages, config, abortSignal) => {
     const result = streamText({
       model: model as Parameters<typeof streamText>[0]['model'],
-      ...(config.temperature != null ? { temperature: config.temperature } : {}),
       maxOutputTokens: config.maxTokens,
       maxRetries: 0,
       messages: messages as never,
@@ -97,12 +93,9 @@ async function callWithExecution(
 
   const model = factory(execution);
   const config = getProviderConfig(execution.providerId);
-  // Reasoning models (o3/o4, deepseek-reasoner, grok-*-reasoning, etc.) reject temperature
-  const isReasoning = /\b(reasoning|reasoner)\b|^o[3-9](-|$)/.test(execution.modelId);
   const effectiveConfig = {
     ...config,
     ...(maxTokensOverride ? { maxTokens: maxTokensOverride } : {}),
-    ...(isReasoning ? { temperature: undefined } : {}),
   };
 
   return caller(model, messages, effectiveConfig, abortSignal);
@@ -207,118 +200,37 @@ export async function runCompletion(
     }
 
     // -----------------------------------------------------------------------
-    // Direct auth path — retry/failover loop
+    // Direct auth path — single attempt, no retry/failover
     // -----------------------------------------------------------------------
     if (proxyProbe?.reason) {
       return fallbackChatResponse();
     }
 
-    const MAX_ATTEMPTS = 3;
-    const triedProfileIds: string[] = [];
-    const rateLimitedProviders = new Set<string>();
-    let lastError: string | undefined;
+    const resolved = await deps.authRouter.resolve({
+      agentId: input.agentId,
+      sessionId: input.sessionId,
+    });
 
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      let resolved;
-      try {
-        resolved = await deps.authRouter.resolve({
-          agentId: input.agentId,
-          sessionId: input.sessionId,
-          excludeProfileIds: triedProfileIds,
-        });
-      } catch (resolveError) {
-        if (attempt === 1) {
-          throw resolveError;
-        }
-        const reason = resolveError instanceof Error ? resolveError.message : String(resolveError);
-        deps.logger.warn(`Auth resolution attempt ${attempt}/${MAX_ATTEMPTS} exhausted`, { reason });
-        break;
-      }
-
-      triedProfileIds.push(resolved.profile.profileId);
-
-      // Skip providers already rate-limited during this completion
-      if (rateLimitedProviders.has(resolved.providerId)) {
-        deps.logger.info('Skipping rate-limited provider', { providerId: resolved.providerId });
-        continue;
-      }
-
-      const provider = deps.providers.get(resolved.providerId);
-      if (!provider) {
-        lastError = `provider not found: ${resolved.providerId}`;
-        deps.authRouter.reportFailure({
-          sessionId: input.sessionId,
-          providerId: resolved.providerId,
-          profileId: resolved.profile.profileId,
-        });
-        continue;
-      }
-
-      const token = extractToken(resolved.profile);
-      if (!token) {
-        lastError = `no token in profile ${resolved.profile.profileId}`;
-        deps.authRouter.reportFailure({
-          sessionId: input.sessionId,
-          providerId: resolved.providerId,
-          profileId: resolved.profile.profileId,
-        });
-        continue;
-      }
-
-      const profileBaseUrl = typeof resolved.profile.data.baseUrl === 'string' ? resolved.profile.data.baseUrl : undefined;
-
-      const execution: CompletionExecution = {
-        providerId: provider.id,
-        modelId: deps.selectModelForProvider(provider.id, resolved.modelId) ?? resolved.modelId,
-        token,
-        ...(profileBaseUrl ? { baseUrl: profileBaseUrl } : {}),
-      };
-
-      try {
-        return await callWithExecution(messages, execution, abortController.signal, caller, maxTok);
-      } catch (completionError) {
-        if (isAbortError(completionError) || abortController.signal.aborted) {
-          throw completionError;
-        }
-
-        // If image content caused the failure, retry text-only before failover
-        if (hasImageContent(messages)) {
-          const reason = completionError instanceof Error ? completionError.message : String(completionError);
-          deps.logger.warn('Model rejected image input, retrying with text-only message', {
-            providerId: execution.providerId,
-            modelId: execution.modelId,
-            reason,
-          });
-          try {
-            const fallbackMessages = asTextOnly(messages);
-            return await callWithExecution(fallbackMessages, execution, abortController.signal, caller, maxTok);
-          } catch {
-            // text-only also failed, fall through to failover
-          }
-        }
-
-        lastError = completionError instanceof Error ? completionError.message : String(completionError);
-
-        // On rate limit, block the entire provider (org-level limit)
-        if (isRateLimitError(completionError)) {
-          rateLimitedProviders.add(resolved.providerId);
-          deps.authRouter.reportProviderRateLimit(input.sessionId, resolved.providerId);
-        }
-
-        deps.authRouter.reportFailure({
-          sessionId: input.sessionId,
-          providerId: resolved.providerId,
-          profileId: resolved.profile.profileId,
-        });
-        deps.logger.warn(`LLM completion attempt ${attempt}/${MAX_ATTEMPTS} failed`, {
-          providerId: resolved.providerId,
-          profileId: resolved.profile.profileId,
-          reason: lastError,
-        });
-      }
+    const provider = deps.providers.get(resolved.providerId);
+    if (!provider) {
+      throw new Error(`provider not found: ${resolved.providerId}`);
     }
 
-    return fallbackChatResponse();
+    const token = extractToken(resolved.profile);
+    if (!token) {
+      throw new Error(`no token in profile ${resolved.profile.profileId}`);
+    }
+
+    const profileBaseUrl = typeof resolved.profile.data.baseUrl === 'string' ? resolved.profile.data.baseUrl : undefined;
+
+    const execution: CompletionExecution = {
+      providerId: provider.id,
+      modelId: deps.selectModelForProvider(provider.id, resolved.modelId) ?? resolved.modelId,
+      token,
+      ...(profileBaseUrl ? { baseUrl: profileBaseUrl } : {}),
+    };
+
+    return await callWithExecution(messages, execution, abortController.signal, caller, maxTok);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
 

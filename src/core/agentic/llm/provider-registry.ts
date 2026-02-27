@@ -39,7 +39,7 @@ interface ProviderEntry {
 
 const registry = new Map<string, ProviderEntry>();
 
-const DEFAULT_CONFIG: CompletionConfig = { temperature: 0, maxTokens: 2048, timeoutMs: 600_000 };
+const DEFAULT_CONFIG: CompletionConfig = { maxTokens: 2048, timeoutMs: 600_000 };
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -110,38 +110,32 @@ function buildProviderModel(sdkFactory: Function) {
  */
 export function registerBuiltinProviders(): void {
   registerProvider('openai', buildProviderModel(createOpenAI), {
-    temperature: 0.6,
     maxTokens: 3072,
     contextLimit: 128_000,
   });
 
   registerProvider('anthropic', buildProviderModel(createAnthropic), {
-    temperature: 0,
     maxTokens: 3072,
     contextLimit: 200_000,
   });
 
   registerProvider('xai', buildProviderModel(createXai), {
-    temperature: 0,
     maxTokens: 4096,
     contextLimit: 128_000,
   });
 
   registerProvider('google', buildProviderModel(createGoogleGenerativeAI), {
-    temperature: 0,
     maxTokens: 3072,
     contextLimit: 1_000_000,
   });
 
   // Local LLM providers (OpenAI-compatible API)
   registerProvider('ollama', buildProviderModel(createOpenAI), {
-    temperature: 0,
     maxTokens: 2048,
     contextLimit: 128_000,
   });
 
   registerProvider('vllm', buildProviderModel(createOpenAI), {
-    temperature: 0,
     maxTokens: 2048,
     contextLimit: 32_768,
   });
@@ -154,7 +148,6 @@ export function registerBuiltinProviders(): void {
 export function registerGatewayVendor(vendorId: string): void {
   if (registry.has(vendorId)) return;
   registerProvider(vendorId, buildProviderModel(createOpenAI), {
-    temperature: 0,
     maxTokens: 2048,
     contextLimit: 128_000,
   });

@@ -21,14 +21,11 @@ function debugLog(msg: string): void {
 import type { LlmCompletionInput, RunCompletionDeps, CompletionExecution, RichMessage } from './llm/types.js';
 import {
   CONTEXT_WINDOW_HARD_MIN_TOKENS,
-  CONTEXT_WINDOW_WARN_BELOW_TOKENS,
   DEFAULT_CONTEXT_TOKENS,
-  estimateMessageTokens,
   extractToken,
   fallbackChatResponse,
   isAbortError,
   isContextOverflowError,
-  isRateLimitError,
   mapMessages,
   RESERVE_TOKENS_DEFAULT,
   trimMessagesToFit,
@@ -228,7 +225,7 @@ export async function runAgentLoop(
 
     debugLog(`runAgentLoop: ${Object.keys(tools).length} tools available, noTools=${!!input.noTools}, session=${input.sessionId}`);
 
-    // Resolve executions and run generateText with failover
+    // Resolve execution — single attempt, no retry/failover
     const executions = await resolveExecutions(input, deps);
     if (executions.length === 0) {
       const text = fallbackChatResponse();
@@ -237,204 +234,113 @@ export async function runAgentLoop(
       return { text, steps: 0, toolCalls: 0, finishReason: 'error' };
     }
 
-    let lastError: string | undefined;
-    const rateLimitedProviders = new Set<string>();
+    const execution = executions[0];
+    const factory = getProviderFactory(execution.providerId);
+    if (!factory) {
+      const text = fallbackChatResponse();
+      callbacks?.onDone?.({ text, steps: 0, toolCalls: 0, finishReason: 'error' });
+      return { text, steps: 0, toolCalls: 0, finishReason: 'error' };
+    }
 
-    for (const execution of executions) {
-      // Skip providers already rate-limited during this loop
-      if (rateLimitedProviders.has(execution.providerId)) {
-        deps.logger.info('Skipping rate-limited provider', {
-          providerId: execution.providerId,
-          modelId: execution.modelId,
-        });
-        continue;
+    const model = factory(execution) as Parameters<typeof generateText>[0]['model'];
+    const providerConfig = getProviderConfig(execution.providerId);
+
+    const contextLimit = providerConfig.contextLimit ?? DEFAULT_CONTEXT_TOKENS;
+
+    if (contextLimit < CONTEXT_WINDOW_HARD_MIN_TOKENS) {
+      deps.logger.warn('Provider context window below minimum', {
+        providerId: execution.providerId,
+        modelId: execution.modelId,
+        contextLimit,
+        minimum: CONTEXT_WINDOW_HARD_MIN_TOKENS,
+      });
+    }
+
+    const effectiveMessages = trimMessagesToFit(messages, contextLimit, RESERVE_TOKENS_DEFAULT);
+
+    let titleSet = false;
+    let stepCount = 0;
+    let lastStepText = '';
+
+    const hasTools = Object.keys(tools).length > 0;
+    const maxSteps = input.maxSteps ?? 25;
+
+    // Manual tool loop: AI SDK v6 defaults to 1 step (stopWhen: stepCountIs(1)).
+    // We loop ourselves so tool results are always fed back to the model.
+    let loopMessages = [...effectiveMessages] as Array<Record<string, unknown>>;
+    let finalText = '';
+    let finalFinishReason = 'unknown';
+
+    for (let step = 0; step < maxSteps; step++) {
+      const result = await generateText({
+        model,
+        maxOutputTokens: input.maxTokens ?? providerConfig.maxTokens,
+        maxRetries: 0,
+        messages: loopMessages as never,
+        ...(hasTools ? { tools, toolChoice: 'auto' as const } : {}),
+        abortSignal: abortController.signal,
+      });
+
+      stepCount++;
+      finalFinishReason = result.finishReason ?? 'unknown';
+
+      // Extract title from first text response
+      if (!titleSet && result.text) {
+        const firstLine = result.text.split('\n')[0]?.trim();
+        if (firstLine) {
+          callbacks?.onTitle?.(firstLine.slice(0, 100));
+          titleSet = true;
+        }
       }
 
-      const factory = getProviderFactory(execution.providerId);
-      if (!factory) {
-        lastError = `Provider unsupported: ${execution.providerId}`;
-        continue;
+      if (result.text) {
+        lastStepText = result.text;
+        callbacks?.onThoughts?.(result.text, stepCount);
       }
 
-      const model = factory(execution) as Parameters<typeof generateText>[0]['model'];
-      const providerConfig = getProviderConfig(execution.providerId);
-
-      // Context management aligned with openclaw: context-window-guard (resolveContextWindowInfo, evaluateContextWindowGuard),
-      // pi-settings reserveTokensFloor, trimMessagesToFit = budget (contextLimit - reserve), system cap 50% + recent conversation.
-      // Resolve context limit: provider config or default (openclaw: resolveContextWindowInfo)
-      const contextLimit = providerConfig.contextLimit ?? DEFAULT_CONTEXT_TOKENS;
-
-      // Openclaw-style context window guard: block if too small, warn if below recommended
-      if (contextLimit < CONTEXT_WINDOW_HARD_MIN_TOKENS) {
-        deps.logger.warn('Skipping provider: context window below minimum', {
-          providerId: execution.providerId,
-          modelId: execution.modelId,
-          contextLimit,
-          minimum: CONTEXT_WINDOW_HARD_MIN_TOKENS,
-        });
-        lastError = `Context window too small (${contextLimit} < ${CONTEXT_WINDOW_HARD_MIN_TOKENS})`;
-        continue;
-      }
-      if (contextLimit < CONTEXT_WINDOW_WARN_BELOW_TOKENS) {
-        deps.logger.warn('Low context window', {
-          providerId: execution.providerId,
-          modelId: execution.modelId,
-          contextLimit,
-          recommendAbove: CONTEXT_WINDOW_WARN_BELOW_TOKENS,
-        });
+      // If the model didn't call tools, we're done
+      if (result.finishReason !== 'tool-calls') {
+        finalText = result.text;
+        break;
       }
 
-      const effectiveMessages = trimMessagesToFit(messages, contextLimit, RESERVE_TOKENS_DEFAULT);
-      const inputTokens = messages.reduce((s, m) => s + estimateMessageTokens(m), 0);
-      const budget = Math.max(1000, contextLimit - RESERVE_TOKENS_DEFAULT);
-      if (inputTokens > budget) {
-        deps.logger.info('Context trimmed to fit model limit (openclaw-style budget)', {
-          providerId: execution.providerId,
-          modelId: execution.modelId,
-          contextLimit,
-          reserveTokens: RESERVE_TOKENS_DEFAULT,
-          estimatedInputTokens: inputTokens,
-        });
-      }
-
-      let titleSet = false;
-      let stepCount = 0;
-      let lastStepText = '';
-
-      try {
-        const hasTools = Object.keys(tools).length > 0;
-        // Reasoning models (o3/o4, deepseek-reasoner, grok-*-reasoning, etc.) reject temperature
-        const isReasoningModel = /\b(reasoning|reasoner)\b|^o[3-9](-|$)/.test(execution.modelId);
-        const maxSteps = input.maxSteps ?? 25;
-      
-
-        // Manual tool loop: AI SDK v6 defaults to 1 step (stopWhen: stepCountIs(1)).
-        // We loop ourselves so tool results are always fed back to the model.
-        let loopMessages = [...effectiveMessages] as Array<Record<string, unknown>>;
-        let finalText = '';
-        let finalFinishReason = 'unknown';
-
-        for (let step = 0; step < maxSteps; step++) {
-          const result = await generateText({
-            model,
-            ...(isReasoningModel ? {} : { temperature: providerConfig.temperature }),
-            maxOutputTokens: input.maxTokens ?? providerConfig.maxTokens,
-            maxRetries: 0,
-            messages: loopMessages as never,
-            ...(hasTools ? { tools, toolChoice: 'auto' as const } : {}),
-            abortSignal: abortController.signal,
-          });
-
-          stepCount++;
-          finalFinishReason = result.finishReason ?? 'unknown';
-
-          // Extract title from first text response
-          if (!titleSet && result.text) {
-            const firstLine = result.text.split('\n')[0]?.trim();
-            if (firstLine) {
-              callbacks?.onTitle?.(firstLine.slice(0, 100));
-              titleSet = true;
-            }
-          }
-
-          if (result.text) {
-            lastStepText = result.text;
-            callbacks?.onThoughts?.(result.text, stepCount);
-          }
-
-          // If the model didn't call tools, we're done
-          if (result.finishReason !== 'tool-calls') {
-            finalText = result.text;
-            break;
-          }
-
-          // Append response messages (assistant tool calls + tool results) for next iteration
-          const responseMessages = (result as unknown as { response: { messages: Array<Record<string, unknown>> } }).response?.messages;
-          if (responseMessages && responseMessages.length > 0) {
-            loopMessages = [...loopMessages, ...responseMessages];
-          } else {
-            // No response messages to feed back — stop to avoid infinite loop
-            finalText = result.text;
-            break;
-          }
-        }
-
-        const responseText = finalText || lastStepText || '(no response)';
-
-        // Emit a compact summary to downstream consumers to save tokens / space.
-        const summaryText = responseText.length > 280
-          ? `${responseText.trim().slice(0, 260)}…`
-          : responseText.trim();
-        callbacks?.onSummary?.(summaryText);
-
-        // Extract rich messages from the loop (everything after initial effectiveMessages)
-        const newMessages = loopMessages.slice(effectiveMessages.length) as Array<Record<string, unknown>>;
-        const richMessages: RichMessage[] = [];
-        for (const raw of newMessages) {
-          const normalized = normalizeAiSdkMessage(raw);
-          if (normalized) richMessages.push(normalized);
-        }
-
-        const loopResult: AgentLoopResult = {
-          text: responseText,
-          steps: stepCount,
-          toolCalls: totalToolCalls,
-          finishReason: finalFinishReason,
-          messages: richMessages.length > 0 ? richMessages : undefined,
-        };
-        callbacks?.onDone?.(loopResult);
-
-        return loopResult;
-      } catch (completionError) {
-        if (isAbortError(completionError) || abortController.signal.aborted) {
-          throw completionError;
-        }
-
-        // Extract detailed error info from AI SDK errors
-        if (completionError instanceof Error) {
-          const err = completionError as Error & { statusCode?: number; responseBody?: string; data?: unknown };
-          lastError = err.responseBody ?? err.message;
-          if (err.data) {
-            lastError = `${err.message} — ${JSON.stringify(err.data)}`;
-          }
-        } else {
-          lastError = String(completionError);
-        }
-
-        // On rate limit, block the entire provider (org-level limit)
-        if (isRateLimitError(completionError)) {
-          rateLimitedProviders.add(execution.providerId);
-          deps.authRouter.reportProviderRateLimit(input.sessionId, execution.providerId);
-          deps.logger.warn('Provider rate-limited, skipping remaining attempts for this provider', {
-            providerId: execution.providerId,
-            modelId: execution.modelId,
-          });
-        }
-
-        // Report failure so auth router deprioritises this profile
-        if (execution.profileId) {
-          deps.authRouter.reportFailure({
-            sessionId: input.sessionId,
-            providerId: execution.providerId,
-            profileId: execution.profileId,
-          });
-        }
-
-        deps.logger.warn('Agent loop attempt failed, trying next provider', {
-          providerId: execution.providerId,
-          modelId: execution.modelId,
-          reason: lastError,
-        });
+      // Append response messages (assistant tool calls + tool results) for next iteration
+      const responseMessages = (result as unknown as { response: { messages: Array<Record<string, unknown>> } }).response?.messages;
+      if (responseMessages && responseMessages.length > 0) {
+        loopMessages = [...loopMessages, ...responseMessages];
+      } else {
+        // No response messages to feed back — stop to avoid infinite loop
+        finalText = result.text;
+        break;
       }
     }
 
-    // All attempts exhausted
-    deps.logger.warn('Agent loop failed, all providers exhausted', { lastError: lastError ?? 'unknown' });
-    const contextOverflowText =
-      'Context overflow: prompt too large for the model. Try /reset (or /new) to start a fresh session, or use a larger-context model. You can also reduce system prompt size in config.';
-    const text = lastError && isContextOverflowError(lastError) ? contextOverflowText : fallbackChatResponse();
-    callbacks?.onDone?.({ text, steps: 0, toolCalls: 0, finishReason: 'error' });
-    return { text, steps: 0, toolCalls: 0, finishReason: 'error' };
+    const responseText = finalText || lastStepText || '(no response)';
+
+    // Emit a compact summary to downstream consumers to save tokens / space.
+    const summaryText = responseText.length > 280
+      ? `${responseText.trim().slice(0, 260)}…`
+      : responseText.trim();
+    callbacks?.onSummary?.(summaryText);
+
+    // Extract rich messages from the loop (everything after initial effectiveMessages)
+    const newMessages = loopMessages.slice(effectiveMessages.length) as Array<Record<string, unknown>>;
+    const richMessages: RichMessage[] = [];
+    for (const raw of newMessages) {
+      const normalized = normalizeAiSdkMessage(raw);
+      if (normalized) richMessages.push(normalized);
+    }
+
+    const loopResult: AgentLoopResult = {
+      text: responseText,
+      steps: stepCount,
+      toolCalls: totalToolCalls,
+      finishReason: finalFinishReason,
+      messages: richMessages.length > 0 ? richMessages : undefined,
+    };
+    callbacks?.onDone?.(loopResult);
+
+    return loopResult;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
 
@@ -508,58 +414,27 @@ async function resolveExecutions(
 
   if (proxyProbe?.reason) return [];
 
-  // Direct auth path — collect all candidate executions
-  const MAX_ATTEMPTS = 3;
-  const triedProfileIds: string[] = [];
-  const executions: CompletionExecution[] = [];
+  // Direct auth path — single execution, no failover
+  const resolved = await deps.authRouter.resolve({
+    agentId: input.agentId,
+    sessionId: input.sessionId,
+    pinnedProviderId: input.pinnedProviderId,
+  });
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    let resolved;
-    try {
-      resolved = await deps.authRouter.resolve({
-        agentId: input.agentId,
-        sessionId: input.sessionId,
-        excludeProfileIds: triedProfileIds,
-        pinnedProviderId: input.pinnedProviderId,
-      });
-    } catch (resolveError) {
-      if (attempt === 1) throw resolveError;
-      break;
-    }
+  const provider = deps.providers.get(resolved.providerId);
+  if (!provider) return [];
 
-    triedProfileIds.push(resolved.profile.profileId);
+  const token = extractToken(resolved.profile);
+  if (!token) return [];
 
-    const provider = deps.providers.get(resolved.providerId);
-    if (!provider) {
-      deps.authRouter.reportFailure({
-        sessionId: input.sessionId,
-        providerId: resolved.providerId,
-        profileId: resolved.profile.profileId,
-      });
-      continue;
-    }
+  const resolvedModelId = input.pinnedModelId
+    ?? deps.selectModelForProvider(provider.id, resolved.modelId)
+    ?? resolved.modelId;
 
-    const token = extractToken(resolved.profile);
-    if (!token) {
-      deps.authRouter.reportFailure({
-        sessionId: input.sessionId,
-        providerId: resolved.providerId,
-        profileId: resolved.profile.profileId,
-      });
-      continue;
-    }
-
-    const resolvedModelId = input.pinnedModelId
-      ?? deps.selectModelForProvider(provider.id, resolved.modelId)
-      ?? resolved.modelId;
-
-    executions.push({
-      providerId: provider.id,
-      modelId: resolvedModelId,
-      token,
-      profileId: resolved.profile.profileId,
-    });
-  }
-
-  return executions;
+  return [{
+    providerId: provider.id,
+    modelId: resolvedModelId,
+    token,
+    profileId: resolved.profile.profileId,
+  }];
 }

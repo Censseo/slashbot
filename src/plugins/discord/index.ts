@@ -13,7 +13,7 @@
  * @see {@link createPlugin} - Re-exported alias for createDiscordPlugin
  */
 import { z } from 'zod';
-import { VoltAgentAdapter } from '@slashbot/core/voltagent/index.js';
+import { KernelLlmAdapter } from '@slashbot/core/agentic/llm/index.js';
 import type { LlmAdapter, TokenModeProxyAuthService } from '@slashbot/core/agentic/llm/index.js';
 import type { JsonValue, PathResolver, SlashbotPlugin, StructuredLogger } from '../../plugin-sdk/index.js';
 import type { SlashbotKernel } from '@slashbot/core/kernel/kernel.js';
@@ -124,7 +124,7 @@ export function createDiscordPlugin(): SlashbotPlugin {
 
       // ── LLM adapters & agent sessions ───────────────────────────────
 
-      const llm = new VoltAgentAdapter(
+      const llm = new KernelLlmAdapter(
         authRouter,
         providers,
         logger,

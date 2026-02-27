@@ -4,13 +4,13 @@ import type { AgentLoopResult } from '../src/core/agentic/llm/index.js';
 import type { LlmCompletionInput } from '../src/core/agentic/llm/index.js';
 
 // ---------------------------------------------------------------------------
-// Mock VoltAgentAdapter — intercept before the plugin imports it
+// Mock KernelLlmAdapter — intercept before the plugin imports it
 // ---------------------------------------------------------------------------
 
 const mockComplete = vi.fn<(input: LlmCompletionInput) => Promise<AgentLoopResult>>();
 
-vi.mock('../src/core/voltagent/index.js', () => ({
-  VoltAgentAdapter: vi.fn().mockImplementation(() => ({
+vi.mock('../src/core/agentic/llm/adapter.js', () => ({
+  KernelLlmAdapter: vi.fn().mockImplementation(() => ({
     complete: mockComplete,
   })),
 }));

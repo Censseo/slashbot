@@ -89,7 +89,6 @@ function applyToExistingProvider(
   // Override CompletionConfig in the LLM provider registry
   if (entry.config) {
     registerProvider(providerId, getExistingFactory(providerId), {
-      ...(entry.config.temperature !== undefined ? { temperature: entry.config.temperature } : {}),
       ...(entry.config.maxTokens !== undefined ? { maxTokens: entry.config.maxTokens } : {}),
       ...(entry.config.contextLimit !== undefined ? { contextLimit: entry.config.contextLimit } : {}),
     });
@@ -167,7 +166,6 @@ function registerCustomProvider(
   };
 
   registerProvider(providerId, factory, {
-    temperature: entry.config?.temperature ?? 0,
     maxTokens: entry.config?.maxTokens ?? 2048,
     ...(entry.config?.contextLimit !== undefined ? { contextLimit: entry.config.contextLimit } : {}),
   });

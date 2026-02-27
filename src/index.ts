@@ -9,6 +9,9 @@
  *
  * @see {@link runCli} -- CLI router that dispatches subcommands
  */
+// Suppress noisy AI SDK warnings (e.g. "temperature is not supported for reasoning models")
+process.env.AI_SDK_LOG_WARNINGS = 'false';
+
 import { runCli } from './ui/cli.js';
 
 async function main(): Promise<void> {

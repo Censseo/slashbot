@@ -18,8 +18,8 @@ import type { ProviderDefinition } from '../core/kernel/contracts.js';
  */
 export function createProvider(pluginId: string): ProviderDefinition {
   return defineProvider('xai', 'xAI', [
-    { id: 'grok-4.1-fast-reasoning', displayName: 'Grok 4.1 Fast Reasoning', contextWindow: 131_072, priority: 1, capabilities: ['chat', 'tools', 'reasoning', 'image'] },
-    { id: 'grok-4.1-fast-non-reasoning', displayName: 'Grok 4.1 Fast Non-Reasoning', contextWindow: 131_072, priority: 2, capabilities: ['chat', 'tools', 'image'] },
+    { id: 'grok-4-1-fast-reasoning', displayName: 'Grok 4.1 Fast Reasoning', contextWindow: 131_072, priority: 1, capabilities: ['chat', 'tools', 'reasoning', 'image'] },
+    { id: 'grok-4-1-fast-non-reasoning', displayName: 'Grok 4.1 Fast Non-Reasoning', contextWindow: 131_072, priority: 2, capabilities: ['chat', 'tools', 'image'] },
     { id: 'grok-4-fast-reasoning', displayName: 'Grok 4 Fast Reasoning', contextWindow: 131_072, priority: 3, capabilities: ['chat', 'tools', 'reasoning', 'image'] },
     { id: 'grok-4-fast-non-reasoning', displayName: 'Grok 4 Fast Non-Reasoning', contextWindow: 131_072, priority: 4, capabilities: ['chat', 'tools', 'image'] },
     { id: 'grok-4', displayName: 'Grok 4', contextWindow: 131_072, priority: 5, capabilities: ['chat', 'tools', 'reasoning', 'image', 'search'] },

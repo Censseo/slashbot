@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { palette } from './palette.js';
+import { useSpinner, useDots } from './use-spinner.js';
 import type { AgentToolAction } from '../core/agentic/llm/index.js';
 
 /** Max tool actions visible in the active list. */
@@ -68,18 +69,13 @@ function toolOutputPreview(action: AgentToolAction, maxLen = 80): string {
   return compact.length > maxLen ? `${compact.slice(0, maxLen - 3)}...` : compact;
 }
 
-/** Build the thin dashed separator line. */
-function thinSeparator(cols: number): string {
-  const segment = '── ';
-  const count = Math.floor(cols / segment.length);
-  return segment.repeat(count).trimEnd();
-}
-
 // ── Component ─────────────────────────────────────────────────────────
 
 export function AgentActivity({ state, busy, cols, displayLabel }: AgentActivityProps) {
   const startTimesRef = useRef<Map<string, number>>(new Map());
   const doneTimesRef = useRef<Map<string, number>>(new Map());
+  const spinner = useSpinner(busy && !state.done);
+  const dots = useDots(busy && !state.done && state.actions.length === 0);
 
   // Track start times for new actions, freeze elapsed on completion
   useEffect(() => {
@@ -96,9 +92,6 @@ export function AgentActivity({ state, busy, cols, displayLabel }: AgentActivity
     }
   }, [state.actions]);
 
-  // Memoize separator to avoid recomputing on every frame
-  const separator = useMemo(() => thinSeparator(cols - 1), [cols]);
-
   // ── Done state ────────────────────────────────────────────────────
   if (state.done) {
     const completedCount = state.actions.filter(a => a.status === 'done' || a.status === 'error').length;
@@ -111,126 +104,113 @@ export function AgentActivity({ state, busy, cols, displayLabel }: AgentActivity
     const latest = dones.length > 0 ? Math.max(...dones) : Date.now();
     const totalMs = latest - earliest;
 
-    const label = displayLabel || 'Agent';
-    const rightText = 'completed';
-    const gap = Math.max(1, cols - label.length - rightText.length - 2);
-
     return (
       <Box flexDirection="column" width={cols} paddingLeft={1}>
         <Box height={1}>
-          <Text color={palette.accent} bold>{label}</Text>
-          <Text>{' '.repeat(gap)}</Text>
-          <Text color={palette.dim}>{rightText}</Text>
-        </Box>
-        <Box height={1}>
-          <Text color={palette.dim}>{separator}</Text>
-        </Box>
-        <Box height={1}>
-          <Text color={palette.success}>
-            {`\u2713 ${completedCount} tool${completedCount !== 1 ? 's' : ''} \u00B7 ${formatElapsed(totalMs)}`}
+          <Text color={palette.success}>{'\u2713 '}</Text>
+          <Text color={palette.muted}>
+            {`${completedCount} tool${completedCount !== 1 ? 's' : ''} \u00B7 ${formatElapsed(totalMs)}`}
           </Text>
         </Box>
       </Box>
     );
   }
 
-  // ── Hidden state — nothing worth showing yet ─────────────────────
-  if (state.actions.length === 0 && !state.thoughts) return null;
+  // ── Thinking state — busy but no tools yet ─────────────────────
+  if (busy && state.actions.length === 0) {
+    const thoughtText = state.thoughts
+      ? (state.thoughts.length > cols - 10
+        ? `${state.thoughts.slice(0, cols - 13)}...`
+        : state.thoughts)
+      : 'Thinking...';
 
-  // ── Active state ──────────────────────────────────────────────────
+    return (
+      <Box flexDirection="column" width={cols} paddingLeft={1}>
+        <Box height={1}>
+          <Text color={palette.accent}>{spinner} </Text>
+          <Text color={palette.muted}>{thoughtText}</Text>
+        </Box>
+        {dots ? (
+          <Box height={1} paddingLeft={2}>
+            <Text color={palette.dim}>{dots}</Text>
+          </Box>
+        ) : null}
+      </Box>
+    );
+  }
+
+  // ── Hidden state — not busy, nothing to show ─────────────────────
+  if (state.actions.length === 0) return null;
+
+  // ── Active state — tools are running ──────────────────────────────
   const visibleActions = state.actions.slice(-MAX_VISIBLE_ACTIONS);
-  const totalToolCalls = state.actions.length;
-  const doneCount = state.actions.filter(a => a.status === 'done' || a.status === 'error').length;
-  const stepNumber = doneCount + (state.actions.some(a => a.status === 'running') ? 1 : 0);
-
-  const label = displayLabel || state.title || 'Agent';
-  const rightParts: string[] = [];
-  if (stepNumber > 0) rightParts.push(`Step ${stepNumber}`);
-  if (totalToolCalls > 0) rightParts.push(`${totalToolCalls} tool${totalToolCalls !== 1 ? 's' : ''}`);
-  const rightText = rightParts.join(' \u00B7 ');
-  const gap = Math.max(1, cols - label.length - rightText.length - 2);
 
   return (
     <Box flexDirection="column" width={cols} paddingLeft={1}>
-      {/* Header */}
-      <Box height={1}>
-        <Text color={palette.accent} bold>{label}</Text>
-        <Text>{' '.repeat(gap)}</Text>
-        <Text color={palette.dim}>{rightText}</Text>
-      </Box>
-
-      {/* Thin separator */}
-      <Box height={1}>
-        <Text color={palette.dim}>{separator}</Text>
-      </Box>
-
       {/* Thoughts line */}
       {state.thoughts && busy ? (
         <Box height={1}>
+          <Text color={palette.accent}>{spinner} </Text>
           <Text color={palette.muted} wrap="truncate-end">
-            {state.thoughts.length > cols - 3
-              ? `${state.thoughts.slice(0, cols - 6)}...`
+            {state.thoughts.length > cols - 6
+              ? `${state.thoughts.slice(0, cols - 9)}...`
               : state.thoughts}
           </Text>
         </Box>
       ) : null}
 
       {/* Tool action list */}
-      {visibleActions.length > 0 ? (
-        <Box flexDirection="column" marginTop={state.thoughts && busy ? 1 : 0}>
-          {state.actions.length > MAX_VISIBLE_ACTIONS ? (
-            <Box height={1} paddingLeft={2}>
-              <Text color={palette.dim}>
-                {`... ${state.actions.length - MAX_VISIBLE_ACTIONS} more above`}
-              </Text>
-            </Box>
-          ) : null}
-          {visibleActions.map((action) => {
-            const key = action.id || `${action.toolId}-${state.actions.indexOf(action)}`;
-            const startTime = startTimesRef.current.get(key);
-            const endTime = doneTimesRef.current.get(key);
-            // Running: show live elapsed; done/error: show frozen elapsed
-            const elapsed = startTime
-              ? (endTime ?? Date.now()) - startTime
-              : 0;
-            const elapsedStr = formatElapsed(elapsed);
-            const displayName = action.toolId || action.name || 'tool';
-            const argMaxLen = Math.max(20, cols - displayName.length - elapsedStr.length - 12);
-            const args = argsPreview(action, argMaxLen);
-            const errorPreview = toolOutputPreview(action, Math.max(40, cols - 8));
-
-            // Right-align elapsed time
-            const leftLen = 4 + displayName.length + (args ? 2 + args.length : 0);
-            const timeGap = Math.max(1, cols - leftLen - elapsedStr.length - 2);
-
-            return (
-              <Box key={key} flexDirection="column">
-                <Box height={1}>
-                  <Text>{'   '}</Text>
-                  {action.status === 'running' ? (
-                    <Text color={palette.accent}>{'◐ '}</Text>
-                  ) : action.status === 'error' ? (
-                    <Text color={palette.error}>{'\u2717 '}</Text>
-                  ) : (
-                    <Text color={palette.success}>{'\u2713 '}</Text>
-                  )}
-                  <Text color={palette.text} bold>{displayName}</Text>
-                  {args ? <Text color={palette.muted}>{`  ${args}`}</Text> : null}
-                  <Text>{' '.repeat(timeGap)}</Text>
-                  <Text color={action.status === 'running' ? palette.text : palette.dim}>
-                    {elapsedStr}
-                  </Text>
-                </Box>
-                {action.status === 'error' && errorPreview ? (
-                  <Box paddingLeft={5} height={1}>
-                    <Text color={palette.error} wrap="truncate-end">{errorPreview}</Text>
-                  </Box>
-                ) : null}
-              </Box>
-            );
-          })}
+      {state.actions.length > MAX_VISIBLE_ACTIONS ? (
+        <Box height={1} paddingLeft={2}>
+          <Text color={palette.dim}>
+            {`\u2502 ${state.actions.length - MAX_VISIBLE_ACTIONS} more above`}
+          </Text>
         </Box>
       ) : null}
+      {visibleActions.map((action) => {
+        const key = action.id || `${action.toolId}-${state.actions.indexOf(action)}`;
+        const startTime = startTimesRef.current.get(key);
+        const endTime = doneTimesRef.current.get(key);
+        // Running: show live elapsed; done/error: show frozen elapsed
+        const elapsed = startTime
+          ? (endTime ?? Date.now()) - startTime
+          : 0;
+        const elapsedStr = formatElapsed(elapsed);
+        const displayName = action.toolId || action.name || 'tool';
+        const argMaxLen = Math.max(20, cols - displayName.length - elapsedStr.length - 12);
+        const args = argsPreview(action, argMaxLen);
+        const errorPreview = toolOutputPreview(action, Math.max(40, cols - 8));
+
+        // Right-align elapsed time
+        const leftLen = 4 + displayName.length + (args ? 2 + args.length : 0);
+        const timeGap = Math.max(1, cols - leftLen - elapsedStr.length - 2);
+
+        return (
+          <Box key={key} flexDirection="column">
+            <Box height={1}>
+              <Text>{'  '}</Text>
+              {action.status === 'running' ? (
+                <Text color={palette.accent}>{spinner} </Text>
+              ) : action.status === 'error' ? (
+                <Text color={palette.error}>{'\u2717 '}</Text>
+              ) : (
+                <Text color={palette.success}>{'\u2713 '}</Text>
+              )}
+              <Text color={palette.text} bold>{displayName}</Text>
+              {args ? <Text color={palette.muted}>{`  ${args}`}</Text> : null}
+              <Text>{' '.repeat(timeGap)}</Text>
+              <Text color={action.status === 'running' ? palette.text : palette.dim}>
+                {elapsedStr}
+              </Text>
+            </Box>
+            {action.status === 'error' && errorPreview ? (
+              <Box paddingLeft={5} height={1}>
+                <Text color={palette.error} wrap="truncate-end">{errorPreview}</Text>
+              </Box>
+            ) : null}
+          </Box>
+        );
+      })}
     </Box>
   );
 }

@@ -8,7 +8,7 @@
  * @see {@link runSinglePromptNonInteractive} -- Main entry point
  */
 import type { SlashbotKernel } from '../core/kernel/kernel.js';
-import { VoltAgentAdapter } from '../core/voltagent/index.js';
+import { KernelLlmAdapter } from '../core/agentic/llm/index.js';
 import type { TokenModeProxyAuthService } from '../core/agentic/llm/index.js';
 import type { StructuredLogger } from '../core/kernel/contracts.js';
 import type { ProviderRegistry } from '../core/kernel/registries.js';
@@ -44,7 +44,7 @@ export async function runSinglePromptNonInteractive(
     return 1;
   }
 
-  const llm = new VoltAgentAdapter(
+  const llm = new KernelLlmAdapter(
     authRouter,
     providers,
     logger,
