@@ -495,7 +495,7 @@ describe('FlowManager', () => {
 
       expect(result.id).toBe('new-flow-id');
       expect(result.label).toBe('Test Flow');
-      expect(result.httpEndpoints).toEqual(['/webhook']);
+      expect(result.httpEndpoints).toEqual([{ path: '/webhook', method: 'post' }]);
       expect(result.nodeCount).toBe(2); // non-tab nodes
       expect(result.metadata.creator).toBe('bot');
       expect(result.metadata.flowId).toBe('new-flow-id');
@@ -549,7 +549,7 @@ describe('FlowManager', () => {
         nodes: nodesWithMultipleEndpoints,
       });
 
-      expect(result.httpEndpoints).toEqual(['/api/users', '/api/orders']);
+      expect(result.httpEndpoints).toEqual([{ path: '/api/users', method: 'get' }, { path: '/api/orders', method: 'post' }]);
     });
 
     it('stores metadata in flow-metadata.json', async () => {
@@ -713,7 +713,7 @@ describe('FlowManager', () => {
       expect(result!.id).toBe('flow-abc');
       expect(result!.label).toBe('My Flow');
       expect(result!.nodeCount).toBe(2);
-      expect(result!.httpEndpoints).toEqual(['/test']);
+      expect(result!.httpEndpoints).toEqual([{ path: '/test', method: 'get' }]);
       expect(result!.metadata.creator).toBe('bot');
     });
 
@@ -855,7 +855,7 @@ describe('FlowManager', () => {
       const f1 = result.find(f => f.id === 'flow-1')!;
       expect(f1.label).toBe('Flow One');
       expect(f1.nodeCount).toBe(2);
-      expect(f1.httpEndpoints).toEqual(['/api']);
+      expect(f1.httpEndpoints).toEqual([{ path: '/api', method: 'get' }]);
       expect(f1.metadata.creator).toBe('bot');
 
       const f2 = result.find(f => f.id === 'flow-2')!;
@@ -1231,7 +1231,7 @@ describe('FlowManager', () => {
 
       expect(result.id).toBe('flow-upd');
       expect(result.label).toBe('Updated Label');
-      expect(result.httpEndpoints).toEqual(['/updated']);
+      expect(result.httpEndpoints).toEqual([{ path: '/updated', method: 'get' }]);
       expect(result.metadata.flowId).toBe('flow-upd');
     });
 

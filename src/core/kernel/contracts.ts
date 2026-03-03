@@ -504,6 +504,11 @@ export interface KernelServiceMap {
 
 export interface PluginRegistrationContext {
   registerTool: <TArgs extends JsonValue>(tool: ToolDefinition<TArgs>) => void;
+  /**
+   * Remove a previously registered tool from the kernel tool registry (FR-012).
+   * No-op if the tool is not registered.
+   */
+  unregisterTool: (id: string) => void;
   registerCommand: (command: CommandDefinition) => void;
   registerHook: <T extends Record<string, unknown>>(hook: HookRegistration<T>) => void;
   registerProvider: (provider: ProviderDefinition) => void;

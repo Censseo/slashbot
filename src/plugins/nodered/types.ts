@@ -20,6 +20,9 @@ import type { RingBuffer } from './services/RingBuffer';
  * - disabled -> unavailable (if enabled=true but no Node.js)
  * - unavailable -> stopped (when Node.js becomes available)
  * - stopped -> starting (on start command or auto-start)
+ * - stopped -> setup-needed (when Node-RED is not installed)
+ * - unknown -> setup-needed (when Node-RED is not installed)
+ * - setup-needed -> running (when Node-RED becomes available after setup)
  * - starting -> running (health probe succeeds)
  * - starting -> failed (spawn fails or max retries exhausted)
  * - running -> stopped (intentional stop)
@@ -31,6 +34,7 @@ export type NodeRedState =
   | 'disabled'      // Config enabled=false; no process management
   | 'unavailable'   // Enabled but Node.js not found (missing dependency)
   | 'stopped'       // Enabled and ready to start, but not running
+  | 'setup-needed'  // Node-RED not installed; awaiting user-triggered setup
   | 'starting'      // Process spawned, waiting for health probe success
   | 'running'       // Process healthy and responding
   | 'failed';       // All restart attempts exhausted or fatal error
@@ -93,6 +97,9 @@ export interface NodeRedRuntimeState {
 
   /** Handle for the readiness poll timer (during starting state) */
   readinessPollTimer: ReturnType<typeof setTimeout> | null;
+
+  /** Handle for the setup monitor timer (during setup-needed state) */
+  setupMonitorTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /**

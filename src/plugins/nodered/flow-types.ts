@@ -36,6 +36,16 @@ export interface NodeRedFlow {
 // FlowMetadata — custom sidecar metadata stored in flow-metadata.json
 // ---------------------------------------------------------------------------
 
+/**
+ * Describes a single parameter exposed by a flow's HTTP endpoint.
+ * Used to generate a Zod schema for MCP tool invocation (FR-005).
+ */
+export interface ParamDescriptor {
+  type: 'string' | 'number' | 'boolean';
+  description?: string;
+  required?: boolean;
+}
+
 export interface FlowMetadata {
   flowId: string;
   creator: string;
@@ -44,6 +54,10 @@ export interface FlowMetadata {
   description: string;
   tags: string[];
   mcp: boolean;
+  /** Optional parameter schema for MCP tool invocation (FR-005). */
+  params?: Record<string, ParamDescriptor>;
+  /** Optional timeout override in milliseconds for flow invocation (FR-006). */
+  timeout?: number;
 }
 
 export interface FlowMetadataInput {
@@ -51,6 +65,10 @@ export interface FlowMetadataInput {
   description: string;
   tags: string[];
   mcp: boolean;
+  /** Optional parameter schema for MCP tool invocation (FR-005). */
+  params?: Record<string, ParamDescriptor>;
+  /** Optional timeout override in milliseconds for flow invocation (FR-006). */
+  timeout?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,7 +97,7 @@ export interface FlowInfo {
   id: string;
   label: string;
   nodeCount: number;
-  httpEndpoints: string[];
+  httpEndpoints: { path: string; method: string }[];
   metadata: FlowMetadata;
 }
 

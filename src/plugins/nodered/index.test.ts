@@ -119,14 +119,14 @@ describe('createNodeRedPlugin', () => {
   // ── setup() registrations ─────────────────────────────────────────────────
 
   describe('setup()', () => {
-    it('registers exactly 2 services (nodered.manager, nodered.flowManager)', () => {
+    it('registers core services including nodered.manager, nodered.flowManager, nodered.mcpBridge', () => {
       const plugin = createNodeRedPlugin();
       plugin.setup(mockContext as any);
 
-      expect(registered.services).toHaveLength(2);
       const ids = registered.services.map((s) => s.id);
       expect(ids).toContain('nodered.manager');
       expect(ids).toContain('nodered.flowManager');
+      expect(ids).toContain('nodered.mcpBridge');
     });
 
     it('registers exactly 9 tools', () => {

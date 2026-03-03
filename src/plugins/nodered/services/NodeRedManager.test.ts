@@ -23,6 +23,9 @@ vi.mock('fs', () => ({
   existsSync: vi.fn(),
   mkdirSync: vi.fn(),
   appendFileSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  readFileSync: vi.fn().mockReturnValue(''),
+  unlinkSync: vi.fn(),
   chmodSync: vi.fn(),
   promises: {
     open: vi.fn().mockResolvedValue({
@@ -505,33 +508,23 @@ describe('NodeRedManager', () => {
       expect(state1).toBe(state2);
     });
 
-    it('auto-installs Node-RED via npm if red.js not found', async () => {
+    it('transitions to setup-needed state if red.js not found', async () => {
       mockBunFile.mockReturnValue({
         exists: () => Promise.resolve(true),
         text: () => Promise.resolve(JSON.stringify(DEFAULT_CONFIG)),
       });
-      // First: which node (success), Second: npm install (success)
-      mockBunSpawn
-        .mockReturnValueOnce({ exited: Promise.resolve(0), pid: 1, kill: vi.fn() })
-        .mockReturnValueOnce({ exited: Promise.resolve(0), pid: 2, kill: vi.fn(), stdout: null, stderr: null });
+      // which node (success)
+      mockBunSpawn.mockReturnValueOnce({ exited: Promise.resolve(0), pid: 1, kill: vi.fn() });
       mockFetch.mockRejectedValueOnce(new Error('Connection refused'));
 
-      let redJsCallCount = 0;
       mockExistsSync.mockImplementation((p: unknown) => {
-        if (typeof p === 'string' && p.includes('red.js')) {
-          redJsCallCount++;
-          return redJsCallCount > 1; // false first (triggers install), true after (verification)
-        }
+        if (typeof p === 'string' && p.includes('red.js')) return false;
         return true;
       });
 
       await manager.init();
 
-      expect(mockBunSpawn).toHaveBeenCalledWith(
-        ['npm', 'install', 'node-red'],
-        expect.objectContaining({ cwd: expect.any(String) }),
-      );
-      expect(manager.getState()).toBe('stopped');
+      expect(manager.getState()).toBe('setup-needed');
     });
 
     it('skips Node-RED installation if already present', async () => {
@@ -554,15 +547,12 @@ describe('NodeRedManager', () => {
       expect(mockBunSpawn).toHaveBeenCalledWith(['which', 'node'], expect.any(Object));
     });
 
-    it('transitions to failed if Node-RED installation fails', async () => {
+    it('emits nodered:setup-needed event when Node-RED not installed', async () => {
       mockBunFile.mockReturnValue({
         exists: () => Promise.resolve(true),
         text: () => Promise.resolve(JSON.stringify(DEFAULT_CONFIG)),
       });
-      // First: which node (success), Second: npm install (failure)
-      mockBunSpawn
-        .mockReturnValueOnce({ exited: Promise.resolve(0), pid: 1, kill: vi.fn() })
-        .mockReturnValueOnce({ exited: Promise.resolve(1), pid: 2, kill: vi.fn(), stdout: null, stderr: null });
+      mockBunSpawn.mockReturnValueOnce({ exited: Promise.resolve(0), pid: 1, kill: vi.fn() });
 
       mockExistsSync.mockImplementation((p: unknown) => {
         if (typeof p === 'string' && p.includes('red.js')) return false;
@@ -571,39 +561,33 @@ describe('NodeRedManager', () => {
 
       await manager.init();
 
-      expect(manager.getState()).toBe('failed');
+      expect(manager.getState()).toBe('setup-needed');
       expect(mockEmit).toHaveBeenCalledWith(
-        'nodered:failed',
-        expect.objectContaining({
-          error: expect.stringContaining('npm install node-red failed'),
-        }),
+        'nodered:setup-needed',
+        expect.anything(),
       );
     });
 
-    it('transitions to failed if npm install succeeds but red.js still not found', async () => {
+    it('transitions from setup-needed to running when Node-RED becomes available', async () => {
       mockBunFile.mockReturnValue({
         exists: () => Promise.resolve(true),
         text: () => Promise.resolve(JSON.stringify(DEFAULT_CONFIG)),
       });
-      mockBunSpawn
-        .mockReturnValueOnce({ exited: Promise.resolve(0), pid: 1, kill: vi.fn() })
-        .mockReturnValueOnce({ exited: Promise.resolve(0), pid: 2, kill: vi.fn(), stdout: null, stderr: null });
+      mockBunSpawn.mockReturnValueOnce({ exited: Promise.resolve(0), pid: 1, kill: vi.fn() });
 
-      // red.js never found, even after install
       mockExistsSync.mockImplementation((p: unknown) => {
         if (typeof p === 'string' && p.includes('red.js')) return false;
         return true;
       });
 
       await manager.init();
+      expect(manager.getState()).toBe('setup-needed');
 
-      expect(manager.getState()).toBe('failed');
-      expect(mockEmit).toHaveBeenCalledWith(
-        'nodered:failed',
-        expect.objectContaining({
-          error: expect.stringContaining('node-red package not found'),
-        }),
-      );
+      // Simulate Node-RED becoming available (setup monitor fires)
+      mockFetch.mockResolvedValue({ ok: true, status: 200 } as Response);
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(manager.getState()).toBe('running');
     });
   });
 

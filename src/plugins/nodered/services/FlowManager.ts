@@ -211,10 +211,13 @@ export class FlowManager {
   // Helper: extract HTTP endpoint URLs from nodes
   // ============================================================================
 
-  private extractHttpEndpoints(nodes: NodeRedNode[]): string[] {
+  private extractHttpEndpoints(nodes: NodeRedNode[]): { path: string; method: string }[] {
     return nodes
       .filter(n => n.type === 'http in' && typeof n.url === 'string')
-      .map(n => n.url as string);
+      .map(n => ({
+        path: n.url as string,
+        method: (typeof n.method === 'string' ? n.method : 'get').toLowerCase(),
+      }));
   }
 
   private getPort(): number {

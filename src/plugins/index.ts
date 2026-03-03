@@ -1,21 +1,36 @@
 /**
  * @module plugins
  *
- * Bundled plugin loader -- discovers and imports all plugin directories under `src/plugins/`.
+ * Bundled plugin loader -- statically imports all built-in plugins.
  *
- * Scans for subdirectories containing an `index.js` with a `createPlugin()` export,
- * instantiates each plugin to read its manifest, and caches the result.
- *
- * Skipped directories: `services` (shared utilities, not plugins).
+ * Plugins are imported at module level so the Bun compiler bundles them into
+ * the compiled binary. A dynamic filesystem scan is no longer needed.
  *
  * @see {@link getBundledPlugins} -- Main entry point returning factories and discovered manifests
  * @see {@link BundledPluginFactory} -- Type alias for a zero-arg plugin factory function
  */
-import { readdir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { SlashbotPlugin } from '../core/kernel/contracts.js';
 import type { DiscoveredPlugin } from '../core/plugins/discovery.js';
+
+import { createPlugin as createAgenticTools } from './agentic-tools/index.js';
+import { createPlugin as createAgents } from './agents/index.js';
+import { createPlugin as createAutomation } from './automation/index.js';
+import { createPlugin as createCoreOps } from './core-ops/index.js';
+import { createPlugin as createDiscord } from './discord/index.js';
+import { createPlugin as createExplain } from './explain/index.js';
+import { createPlugin as createHeartbeat } from './heartbeat/index.js';
+import { createPlugin as createHooksDiscovery } from './hooks-discovery/index.js';
+import { createPlugin as createMemory } from './memory/index.js';
+import { createPlugin as createOrchestrator } from './orchestrator/index.js';
+import { createPlugin as createProviderAuth } from './provider-auth/index.js';
+import { createPlugin as createSkills } from './skills/index.js';
+import { createPlugin as createSlack } from './slack/index.js';
+import { createPlugin as createSystemPrompt } from './system-prompt/index.js';
+import { createPlugin as createTelegram } from './telegram/index.js';
+import { createPlugin as createTranscription } from './transcription/index.js';
+import { createPlugin as createWallet } from './wallet/index.js';
+import { createPlugin as createWebTools } from './web-tools/index.js';
+import { createPlugin as createWhatsApp } from './whatsapp/index.js';
 
 /** Factory function that creates a SlashbotPlugin instance with no arguments. */
 export type BundledPluginFactory = () => SlashbotPlugin;
@@ -27,41 +42,45 @@ interface BundledPlugins {
   discovered: DiscoveredPlugin[];
 }
 
-const EXCLUDED_DIRS = new Set(['services']);
+const STATIC_PLUGINS: Record<string, BundledPluginFactory> = {
+  agenticTools: createAgenticTools,
+  agents: createAgents,
+  automation: createAutomation,
+  coreOps: createCoreOps,
+  discord: createDiscord,
+  explain: createExplain,
+  heartbeat: createHeartbeat,
+  hooksDiscovery: createHooksDiscovery,
+  memory: createMemory,
+  orchestrator: createOrchestrator,
+  providerAuth: createProviderAuth,
+  skills: createSkills,
+  slack: createSlack,
+  systemPrompt: createSystemPrompt,
+  telegram: createTelegram,
+  transcription: createTranscription,
+  wallet: createWallet,
+  webTools: createWebTools,
+  whatsapp: createWhatsApp,
+};
 
 let cached: BundledPlugins | null = null;
 
 /**
- * Discover and import all bundled plugins from the plugins directory.
+ * Return all bundled plugins via static imports.
  *
- * Scans sibling directories for `index.js` files with a `createPlugin` export,
- * instantiates each to read its manifest, and converts directory names to camelCase keys.
- * Results are cached after the first call.
- *
- * @returns Bundled plugins object containing `factories` map and `discovered` manifest array.
+ * Every built-in plugin is imported at module level so it is included in
+ * compiled Bun binaries. Results are cached after the first call.
  */
 export async function getBundledPlugins(): Promise<BundledPlugins> {
   if (cached) return cached;
 
-  const pluginsDir = dirname(fileURLToPath(import.meta.url));
-  const entries = await readdir(pluginsDir, { withFileTypes: true });
-
   const factories: Record<string, BundledPluginFactory> = {};
   const discovered: DiscoveredPlugin[] = [];
 
-  for (const entry of entries) {
-    if (!entry.isDirectory() || EXCLUDED_DIRS.has(entry.name)) continue;
-
-    const indexPath = join(pluginsDir, entry.name, 'index.js');
-
+  for (const [key, factory] of Object.entries(STATIC_PLUGINS)) {
     try {
-      const mod = await import(pathToFileURL(indexPath).href) as { createPlugin?: BundledPluginFactory };
-      if (typeof mod.createPlugin !== 'function') continue;
-
-      const factory = mod.createPlugin;
       const instance = factory();
-      const key = entry.name.replace(/-([a-z])/g, (_: string, ch: string) => ch.toUpperCase());
-
       factories[key] = factory;
       discovered.push({
         manifest: instance.manifest,
@@ -69,7 +88,7 @@ export async function getBundledPlugins(): Promise<BundledPlugins> {
         source: 'bundled' as const,
       });
     } catch {
-      // Skip directories without a valid plugin
+      // Skip plugins that fail to instantiate
     }
   }
 

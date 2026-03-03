@@ -13,7 +13,9 @@ function resolveHomeSkillsDir(): string {
 }
 
 function resolveBundledSkillsDir(): string {
+  // Bundled skills live in the top-level `skills/` directory (works in both dev and prod).
   const thisDir = dirname(fileURLToPath(import.meta.url));
+  // From src/plugins/skills/ or dist/plugins/skills/ → go up 3 levels to project root.
   return join(thisDir, '..', '..', '..', 'skills');
 }
 

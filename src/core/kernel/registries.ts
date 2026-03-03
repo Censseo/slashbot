@@ -39,6 +39,14 @@ export class Registry<T extends { id: string }> {
   list(): T[] {
     return [...this.items.values()];
   }
+
+  /**
+   * Remove an item from the registry by ID (FR-012).
+   * No-op if the item is not registered.
+   */
+  delete(id: string): void {
+    this.items.delete(id);
+  }
 }
 
 export class ToolRegistry extends Registry<ToolDefinition> {

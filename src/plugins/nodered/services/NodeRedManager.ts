@@ -39,7 +39,8 @@ const DEFAULT_CONFIG: NodeRedConfig = {
 const VALID_TRANSITIONS: Record<NodeRedState, NodeRedState[]> = {
   disabled: ['stopped', 'unavailable'],
   unavailable: ['stopped'],
-  stopped: ['starting', 'failed'],
+  stopped: ['starting', 'failed', 'setup-needed'],
+  'setup-needed': ['running'],
   starting: ['running', 'failed', 'stopped'],
   running: ['stopped', 'starting', 'failed'],
   failed: ['starting', 'stopped'],
@@ -69,6 +70,7 @@ export class NodeRedManager {
     logBuffer: new RingBuffer(200),
     healthCheckTimer: null,
     readinessPollTimer: null,
+    setupMonitorTimer: null,
   };
 
   constructor(eventBus: EventBus, homePath: string) {
@@ -160,14 +162,22 @@ export class NodeRedManager {
       fs.mkdirSync(resolvedUserDir, { recursive: true });
     }
 
-    // Ensure Node-RED is installed (auto-install if missing)
-    const installResult = await this.ensureNodeRedInstalled(resolvedUserDir);
-    if (!installResult.success) {
-      this.setState('failed');
-      this.emitNodeRedEvent({
-        type: 'nodered:failed',
-        error: installResult.error || 'Failed to install Node-RED',
-      });
+    // Generate settings.js eagerly during init
+    const settingsPath = path.join(resolvedUserDir, 'settings.js');
+    const settingsContent = generateSettings(this.config);
+    try {
+      await Bun.write(settingsPath, settingsContent);
+    } catch (error) {
+      // Non-fatal: settings.js will be re-attempted in start()
+    }
+
+    // Check if Node-RED binary exists; if not, delegate setup to skill
+    const redJsPath = path.join(resolvedUserDir, 'node_modules/node-red/red.js');
+    if (!fs.existsSync(redJsPath)) {
+      this.runtimeState.logBuffer?.push('[slashbot] Node-RED not found — setup required.');
+      this.setState('setup-needed');
+      this.emitNodeRedEvent({ type: 'nodered:setup-needed' });
+      this.startSetupMonitor();
       return;
     }
 
@@ -177,75 +187,27 @@ export class NodeRedManager {
         signal: AbortSignal.timeout(2000),
       });
 
-      if (response.ok && response.status === 200) {
+      if (response.ok) {
         // Stale process detected - adopt it via proper state transitions
         this.setState('starting');  // stopped → starting
         this.setState('running');   // starting → running
         this.runtimeState.startedAt = new Date();
+        // Try to read PID from file (optional; best-effort)
+        try {
+          const pidPath = this.pidFilePath();
+          if (fs.existsSync(pidPath)) {
+            const pid = parseInt(fs.readFileSync(pidPath, 'utf8').trim(), 10);
+            if (!isNaN(pid)) this.runtimeState.pid = pid;
+          }
+        } catch {
+          // PID file unavailable — adopt without PID
+        }
         this.startHealthCheckTimer();
         this.emitNodeRedEvent({ type: 'nodered:ready', port: this.config.port });
         return;
       }
     } catch (error) {
       // No stale process - stay in stopped state
-    }
-  }
-
-  /**
-   * Ensure Node-RED is installed in the userDir.
-   * Auto-installs via `npm install node-red` if not found.
-   */
-  private async ensureNodeRedInstalled(userDir: string): Promise<{ success: boolean; error?: string }> {
-    const redJsPath = path.join(userDir, 'node_modules/node-red/red.js');
-
-    if (fs.existsSync(redJsPath)) {
-      return { success: true };
-    }
-
-    this.runtimeState.logBuffer?.push('[slashbot] Node-RED not found — installing via npm...');
-
-    try {
-      const proc = Bun.spawn(['npm', 'install', 'node-red'], {
-        cwd: userDir,
-        env: {
-          HOME: os.homedir(),
-          PATH: process.env.PATH || '',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      const exitCode = await proc.exited;
-
-      if (exitCode !== 0) {
-        let stderr = '';
-        try {
-          if (proc.stderr) {
-            stderr = await new Response(proc.stderr).text();
-          }
-        } catch {
-          // Ignore stderr read errors
-        }
-        return {
-          success: false,
-          error: `npm install node-red failed (exit code ${exitCode})${stderr ? ': ' + stderr.trim().slice(0, 200) : ''}`,
-        };
-      }
-
-      // Verify installation
-      if (!fs.existsSync(redJsPath)) {
-        return {
-          success: false,
-          error: 'npm install completed but node-red package not found',
-        };
-      }
-
-      this.runtimeState.logBuffer?.push('[slashbot] Node-RED installed successfully.');
-      return { success: true };
-    } catch (error) {
-      return {
-        success: false,
-        error: `Failed to install Node-RED: ${error}`,
-      };
     }
   }
 
@@ -274,7 +236,7 @@ export class NodeRedManager {
     // Reset intentional stop flag
     this.runtimeState.intentionalStop = false;
 
-    // Generate settings.js
+    // Refresh settings.js on each start (picks up any config changes since init)
     const resolvedUserDir = this.resolveUserDir();
     const settingsPath = path.join(resolvedUserDir, 'settings.js');
     const settingsContent = generateSettings(this.config);
@@ -287,11 +249,6 @@ export class NodeRedManager {
         success: false,
         error: `Failed to write settings.js: ${error}`,
       };
-    }
-
-    // Create userDir if not exists
-    if (!fs.existsSync(resolvedUserDir)) {
-      fs.mkdirSync(resolvedUserDir, { recursive: true });
     }
 
     // Transition to starting state
@@ -316,6 +273,9 @@ export class NodeRedManager {
 
       this.runtimeState.process = proc;
       this.runtimeState.pid = proc.pid;
+
+      // Write PID file
+      fs.writeFileSync(this.pidFilePath(), `${proc.pid}\n`, { mode: 0o600 });
 
       // Attach log handlers
       this.attachLogHandlers(proc);
@@ -356,7 +316,7 @@ export class NodeRedManager {
           signal: AbortSignal.timeout(2000),
         });
 
-        if (response.ok && response.status === 200) {
+        if (response.ok) {
           // Success - transition to running
           this.clearReadinessPollTimer();
           this.setState('running');
@@ -470,6 +430,48 @@ export class NodeRedManager {
     }
   }
 
+  /**
+   * Start the setup monitor: poll until Node-RED responds on its port,
+   * then transition from `setup-needed` directly to `running`.
+   * Called after entering `setup-needed` state.
+   */
+  private startSetupMonitor(): void {
+    this.clearSetupMonitorTimer();
+
+    this.runtimeState.setupMonitorTimer = setInterval(async () => {
+      if (this.runtimeState.state !== 'setup-needed') {
+        this.clearSetupMonitorTimer();
+        return;
+      }
+
+      try {
+        const response = await fetch(`http://localhost:${this.config.port}/`, {
+          signal: AbortSignal.timeout(2000),
+        });
+
+        if (response.ok) {
+          this.clearSetupMonitorTimer();
+          this.setState('running');
+          this.runtimeState.startedAt = new Date();
+          this.startHealthCheckTimer();
+          this.emitNodeRedEvent({ type: 'nodered:ready', port: this.config.port });
+        }
+      } catch {
+        // Node-RED not yet available — keep polling
+      }
+    }, this.config.healthCheckInterval * 1000);
+  }
+
+  /**
+   * Clear the setup monitor timer.
+   */
+  private clearSetupMonitorTimer(): void {
+    if (this.runtimeState.setupMonitorTimer) {
+      clearInterval(this.runtimeState.setupMonitorTimer);
+      this.runtimeState.setupMonitorTimer = null;
+    }
+  }
+
   /** Reusable TextDecoder for log stream decoding */
   private textDecoder = new TextDecoder();
 
@@ -556,6 +558,7 @@ export class NodeRedManager {
       this.runtimeState.pid = null;
       this.runtimeState.process = null;
       this.runtimeState.restartCount++;
+      this.removePidFile();
 
       this.emitNodeRedEvent({
         type: 'nodered:error',
@@ -577,6 +580,11 @@ export class NodeRedManager {
           type: 'nodered:failed',
           error: `Node-RED failed after ${this.config.maxRestartAttempts} restart attempts`,
         });
+        if (this.onAllRetriesExhausted) {
+          this.onAllRetriesExhausted().catch(() => {
+            // ignore callback errors
+          });
+        }
       }
     }
   }
@@ -632,6 +640,7 @@ export class NodeRedManager {
     }
     this.runtimeState.pid = null;
     this.runtimeState.process = null;
+    this.removePidFile();
     this.emitNodeRedEvent({ type: 'nodered:stopped' });
   }
 
@@ -715,6 +724,7 @@ export class NodeRedManager {
 
     this.clearHealthCheckTimer();
     this.clearReadinessPollTimer();
+    this.clearSetupMonitorTimer();
     this.runtimeState.logBuffer?.clear();
     this.runtimeState.process = null;
     this.runtimeState.pid = null;
@@ -727,9 +737,40 @@ export class NodeRedManager {
   }
 
   /**
+   * Get the crash restart count (number of consecutive restart attempts).
+   */
+  getCrashRestartCount(): number {
+    return this.runtimeState.restartCount;
+  }
+
+  /**
+   * Optional callback invoked when all retry attempts are exhausted.
+   */
+  onAllRetriesExhausted?: () => Promise<void>;
+
+  /**
    * Resolve userDir path (expand tilde)
    */
   private resolveUserDir(): string {
     return this.config.userDir.replace(/^~/, os.homedir());
+  }
+
+  /**
+   * Returns the path to the PID file.
+   */
+  private pidFilePath(): string {
+    return path.join(this.resolveUserDir(), 'nodered.pid');
+  }
+
+  /**
+   * Remove PID file, ignoring errors.
+   */
+  private removePidFile(): void {
+    const pidPath = this.pidFilePath();
+    try {
+      if (fs.existsSync(pidPath)) fs.unlinkSync(pidPath);
+    } catch {
+      // ignore
+    }
   }
 }

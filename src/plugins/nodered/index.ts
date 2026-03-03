@@ -14,6 +14,7 @@ import type { EventBus } from '@slashbot/core/kernel/event-bus.js';
 import type { PathResolver } from '@slashbot/core/kernel/contracts.js';
 import { NodeRedManager } from './services/NodeRedManager.js';
 import { FlowManager } from './services/FlowManager.js';
+import { McpBridgeService } from './services/McpBridgeService.js';
 import { NODERED_PROMPT } from './prompt.js';
 import type { NodeRedState } from './types.js';
 import type { FlowCreateInput, FlowUpdateInput } from './flow-types.js';
@@ -25,6 +26,7 @@ declare module '@slashbot/core/kernel/event-bus.js' {
     'nodered:error': { error: string };
     'nodered:failed': { error: string };
     'nodered:state': { state: string };
+    'nodered:setup-needed': Record<string, never>;
     'prompt:redraw': Record<string, never>;
     'flow:created': { flowId: string; label: string; metadata: Record<string, JsonValue> };
     'flow:updated': { flowId: string; label: string; metadata: Record<string, JsonValue> };
@@ -38,6 +40,7 @@ const STATE_LABELS: Record<NodeRedState, string> = {
   disabled: 'NR: Disabled',
   unavailable: 'NR: Unavailable',
   stopped: 'NR: Stopped',
+  'setup-needed': 'NR: Setup Needed',
   starting: 'NR: Starting',
   running: 'NR: Running',
   failed: 'NR: Failed',
@@ -55,6 +58,7 @@ function formatUptime(seconds: number | null): string {
 export function createNodeRedPlugin(): SlashbotPlugin {
   let manager: NodeRedManager;
   let flowManager: FlowManager;
+  let mcpBridgeService: McpBridgeService;
   let updateStatus: (status: IndicatorStatus) => void;
 
   return {
@@ -74,6 +78,7 @@ export function createNodeRedPlugin(): SlashbotPlugin {
       // Create services
       manager = new NodeRedManager(events, homePath);
       flowManager = new FlowManager(manager, events, homePath);
+      mcpBridgeService = new McpBridgeService(flowManager, events, context, manager.getConfig().port);
 
       // Register services
       context.registerService({
@@ -87,6 +92,12 @@ export function createNodeRedPlugin(): SlashbotPlugin {
         pluginId: PLUGIN_ID,
         description: 'FlowManager CRUD service',
         implementation: flowManager,
+      });
+      context.registerService({
+        id: 'nodered.mcpBridge',
+        pluginId: PLUGIN_ID,
+        description: 'Auto-registers MCP-flagged flows as AI tools',
+        implementation: mcpBridgeService,
       });
 
       // Status indicator
@@ -117,7 +128,11 @@ export function createNodeRedPlugin(): SlashbotPlugin {
         priority: 60,
         provide: () => {
           const state = manager.getState();
-          return state !== 'disabled' ? `Node-RED is currently ${state}.` : '';
+          if (state === 'disabled') return '';
+          if (state === 'setup-needed') {
+            return 'Node-RED is not installed. To install it, run the setup skill: invoke the `nodered-setup` skill using the skills tool or `/skill run nodered-setup`.';
+          }
+          return `Node-RED is currently ${state}.`;
         },
       });
 
@@ -400,7 +415,7 @@ export function createNodeRedPlugin(): SlashbotPlugin {
                   w.write('  No flows deployed.\n');
                 } else {
                   for (const f of flows) {
-                    const endpoints = f.httpEndpoints.length > 0 ? ` | endpoints: ${f.httpEndpoints.join(', ')}` : '';
+                    const endpoints = f.httpEndpoints.length > 0 ? ` | endpoints: ${f.httpEndpoints.map(e => `${e.method.toUpperCase()} ${e.path}`).join(', ')}` : '';
                     w.write(`  ${f.id} | ${f.label} | nodes=${f.nodeCount}${endpoints}\n`);
                   }
                 }
@@ -422,7 +437,7 @@ export function createNodeRedPlugin(): SlashbotPlugin {
                 w.write(`\nFlow: ${info.label}\n`);
                 w.write(`  ID:          ${info.id}\n`);
                 w.write(`  Nodes:       ${info.nodeCount}\n`);
-                w.write(`  Endpoints:   ${info.httpEndpoints.length > 0 ? info.httpEndpoints.join(', ') : 'none'}\n`);
+                w.write(`  Endpoints:   ${info.httpEndpoints.length > 0 ? info.httpEndpoints.map(e => `${e.method.toUpperCase()} ${e.path}`).join(', ') : 'none'}\n`);
                 w.write(`  Creator:     ${info.metadata.creator}\n`);
                 w.write(`  Created:     ${info.metadata.createdAt || 'N/A'}\n`);
                 w.write(`  Updated:     ${info.metadata.updatedAt || 'N/A'}\n`);
@@ -469,6 +484,10 @@ export function createNodeRedPlugin(): SlashbotPlugin {
 
       // ── Hooks ──────────────────────────────────────────────────────
 
+      interface OnceJobScheduler {
+        addOnceJob(name: string, runAtMs: number, prompt: string): Promise<unknown>;
+      }
+
       context.registerHook({
         id: 'nodered.startup',
         pluginId: PLUGIN_ID,
@@ -477,11 +496,43 @@ export function createNodeRedPlugin(): SlashbotPlugin {
         priority: 60,
         handler: async () => {
           await manager.init();
+          try {
+            await mcpBridgeService.init();
+          } catch (err: unknown) {
+            logger.warn('McpBridgeService initialization failed — MCP bridge disabled', {
+              error: String(err),
+            });
+          }
           const config = manager.getConfig();
           const state = manager.getState();
-          if (config.enabled && state !== 'unavailable' && state !== 'disabled') {
+          if (config.enabled && state !== 'unavailable' && state !== 'disabled' && state !== 'setup-needed') {
             await manager.start();
           }
+          if (state === 'setup-needed') {
+            const automation = context.getService<OnceJobScheduler>('automation.service');
+            if (automation) {
+              await automation.addOnceJob(
+                'nodered-setup-prompt',
+                Date.now(),
+                'Node-RED is not installed. Please run the `nodered-setup` skill now to install it.',
+              );
+            }
+          }
+          // T017: Wire crash-restart skill job when all retries are exhausted
+          manager.onAllRetriesExhausted = async () => {
+            const automation = context.getService<OnceJobScheduler>('automation.service');
+            if (automation) {
+              const crashRestartCount = manager.getCrashRestartCount();
+              if (crashRestartCount <= 3) {
+                const backoffMs = 1000 * Math.pow(2, crashRestartCount - 1);
+                await automation.addOnceJob(
+                  'nodered-crash-restart',
+                  Date.now() + backoffMs,
+                  'Node-RED has crashed and failed to restart automatically. Please run the `nodered-setup` skill to reinstall and restart it.',
+                );
+              }
+            }
+          };
           const runState = manager.getState();
           updateStatus(runState === 'running' ? 'connected' : runState === 'starting' ? 'busy' : 'off');
           logger.info('Node-RED plugin initialized', { state: runState });
@@ -495,6 +546,7 @@ export function createNodeRedPlugin(): SlashbotPlugin {
         event: 'shutdown',
         priority: 60,
         handler: async () => {
+          mcpBridgeService.dispose();
           await manager.destroy();
         },
       });
