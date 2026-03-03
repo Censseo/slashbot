@@ -78,6 +78,7 @@ describe('createNodeRedPlugin', () => {
       return vi.fn();
     }),
     contributeContextProvider: vi.fn((p: any) => registered.contextProviders.push(p)),
+    registerGatewayMethod: vi.fn(),
     logger: mockLogger,
   };
 

@@ -248,15 +248,32 @@ export class FlowManager {
   }): Promise<FlowInfo> {
     const { flowId, label, nodes, configs, metadataInput, existingMeta, method, eventType, errorContext } = params;
 
-    // Validate
-    const validation = await validateFlow(nodes, this.getPort());
+    // The Node-RED POST/PUT /flow endpoint creates the tab implicitly from `label`,
+    // so we strip tab nodes before the API call. However, the LLM may or may not
+    // include a tab node in `nodes`. For validation we need a tab node present,
+    // so we synthesize one if missing.
+    const hasTab = nodes.some(n => n.type === 'tab');
+    let nodesForValidation: NodeRedNode[];
+    if (hasTab) {
+      nodesForValidation = nodes;
+    } else {
+      // Derive tab ID from the z field the LLM used on the nodes, or generate one
+      const zValues = nodes.map(n => n.z).filter(Boolean);
+      const syntheticTabId = zValues[0] as string || 'synthetic_tab';
+      nodesForValidation = [
+        { id: syntheticTabId, type: 'tab', label } as NodeRedNode,
+        ...nodes,
+      ];
+    }
+
+    const validation = await validateFlow(nodesForValidation, this.getPort());
     if (!validation.valid) {
       throw new Error(`Flow validation failed: ${validation.errors.join('; ')}`);
     }
 
-    // API call
+    const apiNodes = nodes.filter(n => n.type !== 'tab');
     const url = flowId ? `${this.getBaseUrl()}/flow/${flowId}` : `${this.getBaseUrl()}/flow`;
-    const body: Record<string, unknown> = { label, nodes, configs };
+    const body: Record<string, unknown> = { label, nodes: apiNodes, configs };
     if (flowId) body.id = flowId;
 
     const response = await fetchWithRetry(url, {
@@ -269,7 +286,14 @@ export class FlowManager {
     });
 
     if (!response.ok) {
-      throw new Error(sanitizeApiError(response.status, errorContext));
+      // Include Node-RED's actual error message so the LLM can diagnose and retry
+      let detail = '';
+      try {
+        const errBody = await response.json() as { message?: string; code?: string };
+        detail = errBody.message || errBody.code || '';
+      } catch { /* ignore parse errors */ }
+      const base = sanitizeApiError(response.status, errorContext);
+      throw new Error(detail ? `${base} Detail: ${detail}` : base);
     }
 
     const resultId = flowId ?? (await response.json() as { id: string }).id;

@@ -482,6 +482,79 @@ export function createNodeRedPlugin(): SlashbotPlugin {
         },
       });
 
+      // ── Gateway methods ──────────────────────────────────────────────
+
+      context.registerGatewayMethod({
+        id: 'nodered.status',
+        pluginId: PLUGIN_ID,
+        description: 'Get Node-RED runtime status (state, PID, port, uptime, logs)',
+        handler: async () => {
+          const status = manager.getStatus(20);
+          return status as unknown as JsonValue;
+        },
+      });
+
+      context.registerGatewayMethod({
+        id: 'nodered.flow.list',
+        pluginId: PLUGIN_ID,
+        description: 'List all Node-RED flows with metadata',
+        handler: async () => {
+          const flows = await flowManager.listFlows();
+          return flows as unknown as JsonValue;
+        },
+      });
+
+      context.registerGatewayMethod({
+        id: 'nodered.flow.get',
+        pluginId: PLUGIN_ID,
+        description: 'Get a Node-RED flow by ID. Params: { flowId: string }',
+        handler: async (params) => {
+          const obj = params as Record<string, unknown> | null;
+          const flowId = typeof obj?.flowId === 'string' ? obj.flowId : undefined;
+          if (!flowId) return { ok: false, error: 'missing flowId' } as unknown as JsonValue;
+          const result = await flowManager.getFlow(flowId);
+          if (!result) return { ok: false, error: `Flow not found: ${flowId}` } as unknown as JsonValue;
+          return result as unknown as JsonValue;
+        },
+      });
+
+      context.registerGatewayMethod({
+        id: 'nodered.flow.create',
+        pluginId: PLUGIN_ID,
+        description: 'Create a Node-RED flow. Params: { label, nodes, configs?, metadata? }',
+        handler: async (params) => {
+          const input = params as unknown as FlowCreateInput;
+          if (!input?.label || !input?.nodes) return { ok: false, error: 'missing label or nodes' } as unknown as JsonValue;
+          const result = await flowManager.createFlow(input);
+          return result as unknown as JsonValue;
+        },
+      });
+
+      context.registerGatewayMethod({
+        id: 'nodered.flow.update',
+        pluginId: PLUGIN_ID,
+        description: 'Update a Node-RED flow. Params: { flowId, label?, nodes?, configs?, metadata? }',
+        handler: async (params) => {
+          const { flowId, ...input } = params as unknown as { flowId: string } & FlowUpdateInput;
+          if (!flowId) return { ok: false, error: 'missing flowId' } as unknown as JsonValue;
+          const result = await flowManager.updateFlow(flowId, input);
+          return result as unknown as JsonValue;
+        },
+      });
+
+      context.registerGatewayMethod({
+        id: 'nodered.flow.delete',
+        pluginId: PLUGIN_ID,
+        description: 'Delete a Node-RED flow. Params: { flowId: string }',
+        handler: async (params) => {
+          const obj = params as Record<string, unknown> | null;
+          const flowId = typeof obj?.flowId === 'string' ? obj.flowId : undefined;
+          if (!flowId) return { ok: false, error: 'missing flowId' } as unknown as JsonValue;
+          await flowManager.deleteFlow(flowId);
+          return { ok: true, deleted: flowId } as unknown as JsonValue;
+        },
+      });
+
       // ── Hooks ──────────────────────────────────────────────────────
 
       interface OnceJobScheduler {

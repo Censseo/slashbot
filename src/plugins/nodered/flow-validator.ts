@@ -21,6 +21,11 @@ const BUILTIN_NODE_TYPES = new Set([
   'function',
   'http in',
   'http response',
+  'http request',
+  'change',
+  'switch',
+  'template',
+  'join',
 ]);
 
 /**
@@ -42,6 +47,10 @@ export function validateFlowStructure(nodes: NodeRedNode[]): FlowValidationResul
 
   if (tabNodes.length > 1) {
     errors.push('Flow must contain exactly one tab node');
+    // Early return: per-node validation (id/type/z-field checks below) is skipped intentionally.
+    // When multiple tab nodes are present, z-field values are ambiguous — any node's z could
+    // validly reference either tab — so continuing would produce misleading errors. Failing fast
+    // with a single clear message is correct behaviour; the caller must fix the tab count first.
     return { valid: false, errors };
   }
 
@@ -139,7 +148,13 @@ export async function validateInstalledNodes(
     }
   }
 
-  // Fetch installed nodes from Node-RED API (always call, even if no custom types)
+  // Short-circuit: if every node type is built-in, skip the HTTP call entirely.
+  // No custom types means there is nothing to validate against the Node-RED API.
+  if (nodeTypes.size === 0) {
+    return { valid: true, errors: [] };
+  }
+
+  // Fetch installed nodes from Node-RED API
   try {
     const response = await fetch(`http://localhost:${port}/nodes`);
 

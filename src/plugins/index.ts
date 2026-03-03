@@ -21,6 +21,7 @@ import { createPlugin as createExplain } from './explain/index.js';
 import { createPlugin as createHeartbeat } from './heartbeat/index.js';
 import { createPlugin as createHooksDiscovery } from './hooks-discovery/index.js';
 import { createPlugin as createMemory } from './memory/index.js';
+import { createPlugin as createNodered } from './nodered/index.js';
 import { createPlugin as createOrchestrator } from './orchestrator/index.js';
 import { createPlugin as createProviderAuth } from './provider-auth/index.js';
 import { createPlugin as createSkills } from './skills/index.js';
@@ -52,6 +53,7 @@ const STATIC_PLUGINS: Record<string, BundledPluginFactory> = {
   heartbeat: createHeartbeat,
   hooksDiscovery: createHooksDiscovery,
   memory: createMemory,
+  nodered: createNodered,
   orchestrator: createOrchestrator,
   providerAuth: createProviderAuth,
   skills: createSkills,

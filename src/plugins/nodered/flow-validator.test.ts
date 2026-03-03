@@ -144,7 +144,7 @@ describe('Flow Validator', () => {
       expect(result.errors.length).toBeGreaterThan(1);
     });
 
-    it('passes with empty nodes array', () => {
+    it('fails with empty nodes array', () => {
       const nodes: NodeRedNode[] = [];
 
       const result: FlowValidationResult = validateFlowStructure(nodes);
@@ -302,15 +302,12 @@ describe('Flow Validator', () => {
         { id: 'node4', type: 'comment', z: 'tab1' },
       ];
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => [],
-      });
-
+      // No mockFetch needed: short-circuit skips the HTTP call for all-builtin flows
       const result: FlowValidationResult = await validateInstalledNodes(nodes, 1880);
 
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('fails when custom node is not installed', async () => {
@@ -350,9 +347,10 @@ describe('Flow Validator', () => {
     });
 
     it('fails when fetch returns error', async () => {
+      // Must use a custom type to trigger the HTTP call
       const nodes: NodeRedNode[] = [
         { id: 'tab1', type: 'tab', name: 'Test Flow' },
-        { id: 'node1', type: 'inject', z: 'tab1', wires: [] },
+        { id: 'node1', type: 'custom-node', z: 'tab1', wires: [] },
       ];
 
       mockFetch.mockResolvedValueOnce({
@@ -368,9 +366,10 @@ describe('Flow Validator', () => {
     });
 
     it('fails when fetch throws error', async () => {
+      // Must use a custom type to trigger the HTTP call
       const nodes: NodeRedNode[] = [
         { id: 'tab1', type: 'tab', name: 'Test Flow' },
-        { id: 'node1', type: 'inject', z: 'tab1', wires: [] },
+        { id: 'node1', type: 'custom-node', z: 'tab1', wires: [] },
       ];
 
       mockFetch.mockRejectedValueOnce(new Error('Network error'));
@@ -382,14 +381,15 @@ describe('Flow Validator', () => {
     });
 
     it('uses correct port in fetch URL', async () => {
+      // Must use a custom (non-built-in) node type to trigger the HTTP call
       const nodes: NodeRedNode[] = [
         { id: 'tab1', type: 'tab', name: 'Test Flow' },
-        { id: 'node1', type: 'inject', z: 'tab1', wires: [] },
+        { id: 'node1', type: 'custom-node', z: 'tab1', wires: [] },
       ];
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => [],
+        json: async () => [{ id: 'custom-node', name: 'custom-node', types: ['custom-node'] }],
       });
 
       await validateInstalledNodes(nodes, 9999);
@@ -404,15 +404,12 @@ describe('Flow Validator', () => {
         { id: 'node1', type: 'inject', z: 'tab1', wires: [] },
       ];
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => [],
-      });
-
+      // No mockFetch needed: all types are built-in, short-circuit skips the HTTP call
       const result: FlowValidationResult = await validateInstalledNodes(nodes, 1880);
 
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('handles http in and http response built-in types', async () => {
@@ -422,15 +419,82 @@ describe('Flow Validator', () => {
         { id: 'node2', type: 'http response', z: 'tab1', wires: [] },
       ];
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => [],
-      });
+      // No mockFetch needed: all types are built-in, short-circuit skips the HTTP call
+      const result: FlowValidationResult = await validateInstalledNodes(nodes, 1880);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    // T002: http request should be treated as built-in (not trigger "not installed" error)
+    it('treats http request as a built-in type', async () => {
+      const nodes: NodeRedNode[] = [
+        { id: 'tab1', type: 'tab', name: 'Test Flow' },
+        { id: 'node1', type: 'http request', z: 'tab1', wires: [] },
+      ];
 
       const result: FlowValidationResult = await validateInstalledNodes(nodes, 1880);
 
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    // T003: change should be treated as built-in (not trigger "not installed" error)
+    it('treats change as a built-in type', async () => {
+      const nodes: NodeRedNode[] = [
+        { id: 'tab1', type: 'tab', name: 'Test Flow' },
+        { id: 'node1', type: 'change', z: 'tab1', wires: [] },
+      ];
+
+      const result: FlowValidationResult = await validateInstalledNodes(nodes, 1880);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    // T004: switch should be treated as built-in (not trigger "not installed" error)
+    it('treats switch as a built-in type', async () => {
+      const nodes: NodeRedNode[] = [
+        { id: 'tab1', type: 'tab', name: 'Test Flow' },
+        { id: 'node1', type: 'switch', z: 'tab1', wires: [] },
+      ];
+
+      const result: FlowValidationResult = await validateInstalledNodes(nodes, 1880);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    // T005: template should be treated as built-in (not trigger "not installed" error)
+    it('treats template as a built-in type', async () => {
+      const nodes: NodeRedNode[] = [
+        { id: 'tab1', type: 'tab', name: 'Test Flow' },
+        { id: 'node1', type: 'template', z: 'tab1', wires: [] },
+      ];
+
+      const result: FlowValidationResult = await validateInstalledNodes(nodes, 1880);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    // T006: join should be treated as built-in (not trigger "not installed" error)
+    it('treats join as a built-in type', async () => {
+      const nodes: NodeRedNode[] = [
+        { id: 'tab1', type: 'tab', name: 'Test Flow' },
+        { id: 'node1', type: 'join', z: 'tab1', wires: [] },
+      ];
+
+      const result: FlowValidationResult = await validateInstalledNodes(nodes, 1880);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('deduplicates node types before checking', async () => {
@@ -464,15 +528,12 @@ describe('Flow Validator', () => {
         { id: 'node2', type: 'debug', z: 'tab1', wires: [] },
       ];
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => [],
-      });
-
+      // No mockFetch needed: all types are built-in, short-circuit skips the HTTP call
       const result: FlowValidationResult = await validateFlow(nodes, 1880);
 
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('fails early on structure errors', async () => {
@@ -556,9 +617,10 @@ describe('Flow Validator', () => {
     });
 
     it('handles fetch errors in integrated validation', async () => {
+      // Must use a custom type to trigger the HTTP call
       const nodes: NodeRedNode[] = [
         { id: 'tab1', type: 'tab', name: 'Test Flow' },
-        { id: 'node1', type: 'inject', z: 'tab1', wires: [] },
+        { id: 'node1', type: 'custom-node', z: 'tab1', wires: [] },
       ];
 
       mockFetch.mockRejectedValueOnce(new Error('Connection refused'));
@@ -582,13 +644,7 @@ describe('Flow Validator', () => {
         { id: 'comment1', type: 'comment', z: 'tab1' },
       ];
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => [
-          { id: 'switch', name: 'switch', types: ['switch'] },
-        ],
-      });
-
+      // No mockFetch needed: all types are built-in, short-circuit skips the HTTP call
       const result: FlowValidationResult = await validateFlow(nodes, 1880);
 
       expect(result.valid).toBe(true);
