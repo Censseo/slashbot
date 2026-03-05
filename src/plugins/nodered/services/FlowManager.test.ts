@@ -788,7 +788,7 @@ describe('FlowManager', () => {
 
       await manager.getFlow('flow-url-test');
 
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:1880/flow/flow-url-test', undefined);
+      expect(mockFetch).toHaveBeenCalledWith('http://localhost:1880/flow/flow-url-test', { headers: {} });
     });
   });
 
@@ -972,7 +972,7 @@ describe('FlowManager', () => {
 
       await manager.listFlows();
 
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:1880/flows', undefined);
+      expect(mockFetch).toHaveBeenCalledWith('http://localhost:1880/flows', { headers: {} });
     });
   });
 

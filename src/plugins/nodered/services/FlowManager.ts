@@ -18,9 +18,15 @@ import type {
   NodeRedNode,
 } from '../flow-types';
 import { validateFlow } from '../flow-validator';
-import type { NodeRedState } from '../types';
+import type { NodeRedState, NodeRedConfig } from '../types';
 import * as path from 'path';
 import * as fs from 'fs';
+
+/** Minimal interface for NodeRedManager dependency (avoids circular import). */
+interface INodeRedManagerForFlows {
+  getState(): NodeRedState;
+  getConfig(): NodeRedConfig;
+}
 
 // Constants
 const CURRENT_SCHEMA_VERSION = 1;
@@ -107,16 +113,33 @@ class AsyncMutex {
  * - Thread-safe operations via AsyncMutex
  */
 export class FlowManager {
-  private nodeRedManager: any;
+  private nodeRedManager: INodeRedManagerForFlows;
   private eventBus: EventBus;
   private homePath: string;
   private metadataCache: FlowMetadataFile | null = null;
   private mutex = new AsyncMutex();
+  private lastKnownHash: string | null = null;
 
-  constructor(nodeRedManager: any, eventBus: EventBus, homePath: string) {
+  constructor(nodeRedManager: INodeRedManagerForFlows, eventBus: EventBus, homePath: string) {
     this.nodeRedManager = nodeRedManager;
     this.eventBus = eventBus;
     this.homePath = homePath;
+  }
+
+  // ============================================================================
+  // Admin API Authentication
+  // ============================================================================
+
+  /**
+   * Build auth headers for API requests when adminAuth is enabled.
+   * Uses the static API token stored in config (injected into settings.js adminAuth.tokens).
+   */
+  getAuthHeaders(): Record<string, string> {
+    const config = this.nodeRedManager.getConfig();
+    if (config.editorApiToken) {
+      return { Authorization: `Bearer ${config.editorApiToken}` };
+    }
+    return {};
   }
 
   private get metadataFilePath(): string {
@@ -228,6 +251,15 @@ export class FlowManager {
     return `http://localhost:${this.getPort()}`;
   }
 
+  /**
+   * Wrapper around fetchWithRetry that injects auth headers when adminAuth is enabled.
+   */
+  private apiFetch(url: string, options?: RequestInit): Promise<Response> {
+    const authHeaders = this.getAuthHeaders();
+    const mergedHeaders = { ...authHeaders, ...(options?.headers as Record<string, string> ?? {}) };
+    return fetchWithRetry(url, { ...options, headers: mergedHeaders });
+  }
+
   // ============================================================================
   // Shared CRUD helper
   // ============================================================================
@@ -276,7 +308,7 @@ export class FlowManager {
     const body: Record<string, unknown> = { label, nodes: apiNodes, configs };
     if (flowId) body.id = flowId;
 
-    const response = await fetchWithRetry(url, {
+    const response = await this.apiFetch(url, {
       method,
       headers: {
         'Content-Type': 'application/json',
@@ -320,13 +352,23 @@ export class FlowManager {
 
     // Build result
     const httpEndpoints = this.extractHttpEndpoints(nodes);
-    return {
+    const flowInfo: FlowInfo = {
       id: resultId,
       label,
       nodeCount: nodes.filter(n => n.type !== 'tab').length,
       httpEndpoints,
       metadata: meta,
     };
+
+    // Update hash after create/update (best-effort, non-fatal)
+    try {
+      const hash = await this.getFlowsRevisionHash();
+      this.updateLastKnownHash(hash);
+    } catch {
+      // Hash update failure is non-fatal — poller will catch up
+    }
+
+    return flowInfo;
   }
 
   // ============================================================================
@@ -354,7 +396,7 @@ export class FlowManager {
       throw new Error('Node-RED is not available');
     }
 
-    const response = await fetchWithRetry(`${this.getBaseUrl()}/flow/${flowId}`);
+    const response = await this.apiFetch(`${this.getBaseUrl()}/flow/${flowId}`);
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -398,7 +440,7 @@ export class FlowManager {
       throw new Error('Node-RED is not available');
     }
 
-    const response = await fetchWithRetry(`${this.getBaseUrl()}/flows`);
+    const response = await this.apiFetch(`${this.getBaseUrl()}/flows`);
 
     if (!response.ok) {
       throw new Error(sanitizeApiError(response.status, 'listing flows'));
@@ -456,7 +498,7 @@ export class FlowManager {
     }
 
     // Fetch current flow state from Node-RED
-    const getResponse = await fetchWithRetry(`${this.getBaseUrl()}/flow/${flowId}`);
+    const getResponse = await this.apiFetch(`${this.getBaseUrl()}/flow/${flowId}`);
     if (!getResponse.ok) {
       if (getResponse.status === 404) {
         throw new Error(`Flow not found: ${flowId}`);
@@ -494,7 +536,7 @@ export class FlowManager {
     }
 
     // Verify flow exists
-    const checkResponse = await fetchWithRetry(`${this.getBaseUrl()}/flow/${flowId}`);
+    const checkResponse = await this.apiFetch(`${this.getBaseUrl()}/flow/${flowId}`);
     if (!checkResponse.ok) {
       if (checkResponse.status === 404) {
         throw new Error(`Flow not found: ${flowId}`);
@@ -503,7 +545,7 @@ export class FlowManager {
     }
 
     // DELETE /flow/:id
-    const deleteResponse = await fetchWithRetry(`${this.getBaseUrl()}/flow/${flowId}`, {
+    const deleteResponse = await this.apiFetch(`${this.getBaseUrl()}/flow/${flowId}`, {
       method: 'DELETE',
     });
 
@@ -527,5 +569,47 @@ export class FlowManager {
 
     // Emit event
     this.eventBus.publish('flow:deleted', { flowId, metadata: deletedMeta as any });
+
+    // Update hash after deletion (best-effort, non-fatal)
+    try {
+      const hash = await this.getFlowsRevisionHash();
+      this.updateLastKnownHash(hash);
+    } catch {
+      // Hash update failure is non-fatal — poller will catch up
+    }
+  }
+
+  // ============================================================================
+  // Revision Hash Helpers
+  // ============================================================================
+
+  /**
+   * Compute a SHA-256 hash over the current set of flows (sorted by ID) and
+   * their node counts. Used by FlowChangePoller to detect external changes.
+   *
+   * Format hashed: "flowId1:nodeCount1,flowId2:nodeCount2,..."
+   *
+   * @returns hex-encoded SHA-256 string
+   */
+  async getFlowsRevisionHash(): Promise<string> {
+    const flows = await this.listFlows();
+    const sorted = [...flows].sort((a, b) => a.id.localeCompare(b.id));
+    const str = sorted.map(f => `${f.id}:${f.nodeCount}`).join(',');
+    return new Bun.CryptoHasher('sha256').update(str).digest('hex');
+  }
+
+  /**
+   * Overwrite the cached last-known hash. Should be called after each
+   * successful CRUD operation so the poller baseline stays current.
+   */
+  updateLastKnownHash(hash: string): void {
+    this.lastKnownHash = hash;
+  }
+
+  /**
+   * Return the most recently recorded hash, or null if none has been set yet.
+   */
+  getLastKnownHash(): string | null {
+    return this.lastKnownHash;
   }
 }

@@ -15,6 +15,7 @@ import { z } from 'zod';
 import type { JsonValue, PluginRegistrationContext, StructuredLogger } from '../../../core/kernel/contracts.js';
 import type { EventBus } from '@slashbot/core/kernel/event-bus.js';
 import type { FlowInfo, ParamDescriptor } from '../flow-types.js';
+import type { FlowChange } from '../types.js';
 import type { FlowManager } from './FlowManager.js';
 
 /** Plugin ID used when registering MCP-bridge tools. */
@@ -50,6 +51,7 @@ export class McpBridgeService {
   private unsubscribeUpdated?: () => void;
   private unsubscribeDeleted?: () => void;
   private unsubscribeCreated?: () => void;
+  private unsubscribeExternalChange?: () => void;
 
   constructor(
     private readonly flowManager: IFlowManager,
@@ -90,6 +92,19 @@ export class McpBridgeService {
       const flow = payload?.flow as FlowInfo | undefined;
       if (flow) void this.handleFlowUpdated(flow);
     });
+
+    this.unsubscribeExternalChange = this.events.subscribe('flow:external-change', (envelope: unknown) => {
+      const e = envelope as Record<string, unknown> | undefined;
+      const payload = (e?.payload ?? e) as { changes?: FlowChange[] } | undefined;
+      const changes = payload?.changes ?? [];
+      for (const change of changes) {
+        if (change.changeType === 'deleted') {
+          this.handleFlowDeleted(change.flowId);
+        } else {
+          void this.scanAndRegisterFlow(change.flowId);
+        }
+      }
+    });
   }
 
   public dispose(): void {
@@ -97,10 +112,12 @@ export class McpBridgeService {
     this.unsubscribeUpdated?.();
     this.unsubscribeDeleted?.();
     this.unsubscribeCreated?.();
+    this.unsubscribeExternalChange?.();
     this.unsubscribeReady = undefined;
     this.unsubscribeUpdated = undefined;
     this.unsubscribeDeleted = undefined;
     this.unsubscribeCreated = undefined;
+    this.unsubscribeExternalChange = undefined;
   }
 
   // ---------------------------------------------------------------------------
@@ -146,6 +163,11 @@ export class McpBridgeService {
     if (!def) return;
     this.context.unregisterTool(def.toolId);
     this.registeredTools.delete(flowId);
+    this.logger.warn('MCP tool unregistered — flow deleted externally', {
+      toolId: def.toolId,
+      flowId,
+      label: def.label,
+    });
     this.events.publish('prompt:redraw', {});
   }
 
@@ -185,6 +207,27 @@ export class McpBridgeService {
       this.registerFlowTool(flow);
     }
     // else: not registered, still not eligible → no-op
+  }
+
+  /**
+   * Re-scan a single flow by ID after an external change event.
+   * If the flow exists and is eligible, register/update it; otherwise unregister.
+   */
+  private async scanAndRegisterFlow(flowId: string): Promise<void> {
+    try {
+      const flows = await this.flowManager.listFlows();
+      const flow = flows.find(f => f.id === flowId);
+      if (flow) {
+        await this.handleFlowUpdated(flow);
+      } else {
+        this.handleFlowDeleted(flowId);
+      }
+    } catch (err) {
+      this.logger.warn('Failed to re-scan flow after external change', {
+        flowId,
+        error: String(err),
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------

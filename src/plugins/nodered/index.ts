@@ -15,8 +15,9 @@ import type { PathResolver } from '@slashbot/core/kernel/contracts.js';
 import { NodeRedManager } from './services/NodeRedManager.js';
 import { FlowManager } from './services/FlowManager.js';
 import { McpBridgeService } from './services/McpBridgeService.js';
+import { FlowChangePoller } from './services/FlowChangePoller.js';
 import { NODERED_PROMPT } from './prompt.js';
-import type { NodeRedState } from './types.js';
+import type { NodeRedState, FlowChangeEvent } from './types.js';
 import type { FlowCreateInput, FlowUpdateInput } from './flow-types.js';
 
 declare module '@slashbot/core/kernel/event-bus.js' {
@@ -31,6 +32,7 @@ declare module '@slashbot/core/kernel/event-bus.js' {
     'flow:created': { flowId: string; label: string; metadata: Record<string, JsonValue> };
     'flow:updated': { flowId: string; label: string; metadata: Record<string, JsonValue> };
     'flow:deleted': { flowId: string; metadata: Record<string, JsonValue> };
+    'flow:external-change': FlowChangeEvent;
   }
 }
 
@@ -59,6 +61,7 @@ export function createNodeRedPlugin(): SlashbotPlugin {
   let manager: NodeRedManager;
   let flowManager: FlowManager;
   let mcpBridgeService: McpBridgeService;
+  let flowChangePoller: FlowChangePoller;
   let updateStatus: (status: IndicatorStatus) => void;
 
   return {
@@ -79,6 +82,7 @@ export function createNodeRedPlugin(): SlashbotPlugin {
       manager = new NodeRedManager(events, homePath);
       flowManager = new FlowManager(manager, events, homePath);
       mcpBridgeService = new McpBridgeService(flowManager, events, context, manager.getConfig().port);
+      flowChangePoller = new FlowChangePoller(flowManager, events);
 
       // Register services
       context.registerService({
@@ -131,6 +135,10 @@ export function createNodeRedPlugin(): SlashbotPlugin {
           if (state === 'disabled') return '';
           if (state === 'setup-needed') {
             return 'Node-RED is not installed. To install it, run the setup skill: invoke the `nodered-setup` skill using the skills tool or `/skill run nodered-setup`.';
+          }
+          const editorUrl = manager.getEditorUrl();
+          if (editorUrl) {
+            return `Node-RED is currently ${state}. Editor: ${editorUrl}`;
           }
           return `Node-RED is currently ${state}.`;
         },
@@ -314,7 +322,7 @@ export function createNodeRedPlugin(): SlashbotPlugin {
         id: 'nodered',
         pluginId: PLUGIN_ID,
         description: 'Manage Node-RED lifecycle and flows',
-        subcommands: ['status', 'start', 'stop', 'restart', 'config', 'flow'],
+        subcommands: ['status', 'start', 'stop', 'restart', 'config', 'ui', 'flow'],
         execute: async (args, commandContext) => {
           const sub = args[0]?.toLowerCase() ?? 'status';
           const w = commandContext.stdout;
@@ -378,7 +386,39 @@ export function createNodeRedPlugin(): SlashbotPlugin {
               w.write(`  shutdownTimeout:      ${config.shutdownTimeout}s\n`);
               w.write(`  maxRestartAttempts:   ${config.maxRestartAttempts}\n`);
               w.write(`  localhostOnly:        ${config.localhostOnly}\n`);
-              w.write(`  userDir:              ${config.userDir}\n\n`);
+              w.write(`  userDir:              ${config.userDir}\n`);
+              w.write(`  editor.username:      ${config.editorUsername ?? '(not set)'}\n`);
+              w.write(`  editor.password:      ${config.editorPasswordHash ? '(configured)' : '(not set)'}\n\n`);
+              return 0;
+            }
+
+            // Handle editor credential subkeys
+            if (key === 'editor.username') {
+              if (!value) {
+                commandContext.stderr.write('Usage: /nodered config editor.username <user>\n');
+                return 1;
+              }
+              if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
+                commandContext.stderr.write('Username must contain only alphanumeric characters, hyphens, and underscores.\n');
+                return 1;
+              }
+              await manager.saveConfig({ editorUsername: value });
+              w.write(`Editor username set to "${value}". Restart Node-RED to apply.\n`);
+              return 0;
+            }
+
+            if (key === 'editor.password') {
+              if (!value) {
+                commandContext.stderr.write('Usage: /nodered config editor.password <pass>\n');
+                return 1;
+              }
+              const hash = await Bun.password.hash(value, 'bcrypt');
+              // Generate a static API token for internal Admin API access
+              const tokenBytes = new Uint8Array(32);
+              crypto.getRandomValues(tokenBytes);
+              const apiToken = Array.from(tokenBytes, b => b.toString(16).padStart(2, '0')).join('');
+              await manager.saveConfig({ editorPasswordHash: hash, editorApiToken: apiToken });
+              w.write('Editor password configured. Restart Node-RED to apply.\n');
               return 0;
             }
 
@@ -388,7 +428,7 @@ export function createNodeRedPlugin(): SlashbotPlugin {
             }
 
             if (!(UPDATABLE_KEYS as readonly string[]).includes(key)) {
-              commandContext.stderr.write(`Unknown config key: ${key}. Supported: ${UPDATABLE_KEYS.join(', ')}\n`);
+              commandContext.stderr.write(`Unknown config key: ${key}. Supported: ${UPDATABLE_KEYS.join(', ')}, editor.username, editor.password\n`);
               return 1;
             }
 
@@ -401,6 +441,28 @@ export function createNodeRedPlugin(): SlashbotPlugin {
             await manager.saveConfig({ [key]: numericValue });
             w.write(`Updated ${key} = ${numericValue}\n`);
             w.write('Note: restart Node-RED for changes to take effect\n');
+            return 0;
+          }
+
+          if (sub === 'ui') {
+            const editorState = manager.getEditorState();
+            if (editorState === 'disabled') {
+              const config = manager.getConfig();
+              if (config.editorUsername && !config.editorPasswordHash) {
+                w.write('Editor password is not configured. Use `/nodered config editor.password <pass>` to set it.\n');
+              } else if (!config.editorUsername && config.editorPasswordHash) {
+                w.write('Editor username is not configured. Use `/nodered config editor.username <user>` to set it.\n');
+              } else {
+                w.write('Editor authentication is not configured. Use `/nodered config editor.username <user>` and `/nodered config editor.password <pass>` to set credentials.\n');
+              }
+              return 0;
+            }
+            if (editorState === 'unavailable') {
+              w.write('Node-RED is not running. Use `/nodered start` to start it.\n');
+              return 0;
+            }
+            const url = manager.getEditorUrl();
+            w.write(`Node-RED Editor: ${url}\n`);
             return 0;
           }
 
@@ -477,6 +539,7 @@ export function createNodeRedPlugin(): SlashbotPlugin {
           w.write(`  /nodered stop       Stop Node-RED\n`);
           w.write(`  /nodered restart    Restart Node-RED\n`);
           w.write(`  /nodered config     Show/update configuration\n`);
+          w.write(`  /nodered ui         Open the Node-RED editor\n`);
           w.write(`  /nodered flow       Flow management\n\n`);
           return 0;
         },
@@ -576,6 +639,10 @@ export function createNodeRedPlugin(): SlashbotPlugin {
               error: String(err),
             });
           }
+          // Wire FlowChangePoller to lifecycle events
+          events.subscribe('nodered:ready', () => { flowChangePoller.start(); });
+          events.subscribe('nodered:stopped', () => { flowChangePoller.stop(); });
+
           const config = manager.getConfig();
           const state = manager.getState();
           if (config.enabled && state !== 'unavailable' && state !== 'disabled' && state !== 'setup-needed') {
@@ -619,6 +686,7 @@ export function createNodeRedPlugin(): SlashbotPlugin {
         event: 'shutdown',
         priority: 60,
         handler: async () => {
+          flowChangePoller.stop();
           mcpBridgeService.dispose();
           await manager.destroy();
         },

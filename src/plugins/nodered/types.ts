@@ -64,6 +64,15 @@ export interface NodeRedConfig {
 
   /** Whether to bind Node-RED to localhost only. Default: true */
   localhostOnly: boolean;
+
+  /** Admin username for Node-RED editor login */
+  editorUsername?: string;
+
+  /** bcrypt hash of editor password (must start with $2b$ or $2a$) */
+  editorPasswordHash?: string;
+
+  /** Static API token for internal Admin API access (auto-generated with credentials) */
+  editorApiToken?: string;
 }
 
 /**
@@ -101,6 +110,45 @@ export interface NodeRedRuntimeState {
   /** Handle for the setup monitor timer (during setup-needed state) */
   setupMonitorTimer: ReturnType<typeof setTimeout> | null;
 }
+
+/**
+ * Describes a single flow change detected by the poller.
+ */
+export interface FlowChange {
+  flowId: string;
+  changeType: 'created' | 'modified' | 'deleted';
+  label?: string;
+}
+
+/**
+ * Event emitted when flows are modified externally (via the Node-RED editor).
+ */
+export interface FlowChangeEvent {
+  type: 'flow:external-change';
+  changes: FlowChange[];
+  detectedAt: number;
+  previousHash: string;
+  currentHash: string;
+}
+
+/**
+ * Runtime-derived state for editor availability.
+ * - disabled: No credentials configured
+ * - unavailable: Node-RED not running
+ * - available: Running + credentials configured
+ */
+export type EditorState = 'disabled' | 'unavailable' | 'available';
+
+/**
+ * Union of all Node-RED plugin event types.
+ */
+export type NodeRedEvent =
+  | { type: 'nodered:ready'; port: number }
+  | { type: 'nodered:stopped' }
+  | { type: 'nodered:setup-needed' }
+  | { type: 'nodered:error'; error: string }
+  | { type: 'nodered:crash'; code: number | null; signal: string | null; willRestart: boolean }
+  | FlowChangeEvent;
 
 /**
  * Status snapshot for display in `/nodered status` command.

@@ -16,7 +16,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import type { EventBus } from '@slashbot/core/kernel/event-bus.js';
-import type { NodeRedState, NodeRedConfig, NodeRedStatus, NodeRedRuntimeState } from '../types';
+import type { NodeRedState, NodeRedConfig, NodeRedStatus, NodeRedRuntimeState, EditorState } from '../types';
 import { RingBuffer } from './RingBuffer';
 import { generateSettings } from './settings';
 
@@ -683,6 +683,42 @@ export class NodeRedManager {
       restartCount: this.runtimeState.restartCount,
       recentLogs: this.runtimeState.logBuffer?.tail(logLines) || [],
     };
+  }
+
+  /**
+   * Get the editor availability state.
+   *
+   * - 'disabled': No credentials configured (editorUsername or editorPasswordHash missing)
+   * - 'unavailable': Node-RED not running
+   * - 'available': Running + credentials configured
+   */
+  getEditorState(): EditorState {
+    const hasCredentials =
+      Boolean(this.config.editorUsername) && Boolean(this.config.editorPasswordHash);
+
+    if (!hasCredentials) {
+      return 'disabled';
+    }
+
+    if (this.runtimeState.state !== 'running') {
+      return 'unavailable';
+    }
+
+    return 'available';
+  }
+
+  /**
+   * Get the editor URL if the editor is available, or null otherwise.
+   *
+   * Returns null when EditorState is 'disabled' or 'unavailable'.
+   * Returns `http://localhost:{port}` when EditorState is 'available'.
+   */
+  getEditorUrl(): string | null {
+    if (this.getEditorState() !== 'available') {
+      return null;
+    }
+
+    return `http://localhost:${this.config.port}`;
   }
 
   /**

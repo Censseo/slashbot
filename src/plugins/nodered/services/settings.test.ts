@@ -102,9 +102,19 @@ describe('generateSettings', () => {
   });
 
   describe('httpAdminRoot mapping', () => {
-    it('sets httpAdminRoot to /', () => {
+    it('sets httpAdminRoot to false when no credentials configured', () => {
       const result = generateSettings(defaultConfig);
       expect(result).toContain('httpAdminRoot: ');
+      expect(result).toMatch(/httpAdminRoot:\s*false/);
+    });
+
+    it('sets httpAdminRoot to "/" when credentials are configured', () => {
+      const config = {
+        ...defaultConfig,
+        editorUsername: 'admin',
+        editorPasswordHash: '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012',
+      };
+      const result = generateSettings(config);
       expect(result).toMatch(/httpAdminRoot:\s*['"]\/['"]/);
     });
   });
@@ -347,6 +357,149 @@ describe('generateSettings', () => {
       const result = generateSettings(defaultConfig);
       // The logging object should be well-formed
       expect(result).toMatch(/logging:\s*\{[\s\S]*console:\s*\{[\s\S]*level:/);
+    });
+  });
+
+  describe('adminAuth configuration', () => {
+    it('emits adminAuth block when both editorUsername and editorPasswordHash are set', () => {
+      const config = {
+        ...defaultConfig,
+        editorUsername: 'admin',
+        editorPasswordHash: '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012',
+      };
+      const result = generateSettings(config);
+      expect(result).toContain('adminAuth');
+      expect(result).toContain("username: 'admin'");
+      expect(result).toContain('password:');
+      expect(result).toContain('$2b$10$');
+    });
+
+    it('sets httpAdminRoot to "/" when credentials are configured', () => {
+      const config = {
+        ...defaultConfig,
+        editorUsername: 'admin',
+        editorPasswordHash: '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012',
+      };
+      const result = generateSettings(config);
+      expect(result).toMatch(/httpAdminRoot:\s*['"]\/['"]/);
+    });
+
+    it('sets httpAdminRoot to false when credentials are NOT configured', () => {
+      const result = generateSettings(defaultConfig);
+      expect(result).toMatch(/httpAdminRoot:\s*false/);
+    });
+
+    it('does not emit adminAuth when editorUsername is missing', () => {
+      const config = {
+        ...defaultConfig,
+        editorPasswordHash: '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012',
+      };
+      const result = generateSettings(config);
+      expect(result).not.toContain('adminAuth');
+      expect(result).toMatch(/httpAdminRoot:\s*false/);
+    });
+
+    it('does not emit adminAuth when editorPasswordHash is missing', () => {
+      const config = {
+        ...defaultConfig,
+        editorUsername: 'admin',
+      };
+      const result = generateSettings(config);
+      expect(result).not.toContain('adminAuth');
+      expect(result).toMatch(/httpAdminRoot:\s*false/);
+    });
+
+    it('generates valid JavaScript when adminAuth is present', () => {
+      const config = {
+        ...defaultConfig,
+        editorUsername: 'admin',
+        editorPasswordHash: '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012',
+      };
+      const result = generateSettings(config);
+      expect(() => {
+        new Function(`return ${result.replace(/^module\.exports\s*=\s*/, '')}`);
+      }).not.toThrow();
+    });
+  });
+
+  describe('partial credential configuration (T018)', () => {
+    it('treats username-only as unconfigured', () => {
+      const config = { ...defaultConfig, editorUsername: 'admin' };
+      const result = generateSettings(config);
+      expect(result).not.toContain('adminAuth');
+      expect(result).toMatch(/httpAdminRoot:\s*false/);
+    });
+
+    it('treats password-only as unconfigured', () => {
+      const config = {
+        ...defaultConfig,
+        editorPasswordHash: '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012',
+      };
+      const result = generateSettings(config);
+      expect(result).not.toContain('adminAuth');
+      expect(result).toMatch(/httpAdminRoot:\s*false/);
+    });
+  });
+
+  describe('malformed editorPasswordHash (T019)', () => {
+    it('disables editor when hash does not start with $2b$ or $2a$', () => {
+      const config = {
+        ...defaultConfig,
+        editorUsername: 'admin',
+        editorPasswordHash: 'not-a-bcrypt-hash',
+      };
+      const result = generateSettings(config);
+      expect(result).not.toContain('adminAuth');
+      expect(result).toMatch(/httpAdminRoot:\s*false/);
+    });
+
+    it('accepts $2a$ prefix as valid', () => {
+      const config = {
+        ...defaultConfig,
+        editorUsername: 'admin',
+        editorPasswordHash: '$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012',
+      };
+      const result = generateSettings(config);
+      expect(result).toContain('adminAuth');
+    });
+
+    it('accepts $2b$ prefix as valid', () => {
+      const config = {
+        ...defaultConfig,
+        editorUsername: 'admin',
+        editorPasswordHash: '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012',
+      };
+      const result = generateSettings(config);
+      expect(result).toContain('adminAuth');
+    });
+
+    it('generates valid JS even with malformed hash', () => {
+      const config = {
+        ...defaultConfig,
+        editorUsername: 'admin',
+        editorPasswordHash: 'malformed',
+      };
+      const result = generateSettings(config);
+      expect(() => {
+        new Function(`return ${result.replace(/^module\.exports\s*=\s*/, '')}`);
+      }).not.toThrow();
+    });
+  });
+
+  describe('control character stripping (T024)', () => {
+    it('strips newlines and control characters from username', () => {
+      const config = {
+        ...defaultConfig,
+        editorUsername: "admin\n\r\x00injected",
+        editorPasswordHash: '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012',
+      };
+      const result = generateSettings(config);
+      // Username should have control chars stripped
+      expect(result).toContain("username: 'admininjected'");
+      // Verify it doesn't contain raw control chars in the username field
+      const usernameMatch = result.match(/username: '([^']*)'/);
+      expect(usernameMatch).not.toBeNull();
+      expect(usernameMatch![1]).toBe('admininjected');
     });
   });
 
