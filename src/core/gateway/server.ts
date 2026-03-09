@@ -28,7 +28,7 @@ import type {
   RuntimeConfig,
   StructuredLogger
 } from '../kernel/contracts.js';
-import { GatewayMethodRegistry, HttpRouteRegistry } from '../kernel/registries.js';
+import { GatewayMethodRegistry, HttpRouteRegistry, type ServiceRegistry } from '../kernel/registries.js';
 
 const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
@@ -47,12 +47,16 @@ const GatewayRequestSchema = z.object({
   requestId: z.string().optional(),
 });
 
+/** Handler signature for static file serving fallback. */
+export type StaticFileHandler = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
+
 interface SlashbotGatewayOptions {
   config: RuntimeConfig;
   methods: GatewayMethodRegistry;
   routes: HttpRouteRegistry;
   logger: StructuredLogger;
   healthProvider: () => HealthStatus;
+  services?: ServiceRegistry;
 }
 
 function parseAuthorizationToken(req: IncomingMessage): string | undefined {
@@ -350,6 +354,24 @@ export class SlashbotGateway {
       return;
     }
 
+    // --- Static file fallback (auth-exempt, non-API paths) ---
+    const url = req.url.split('?')[0];
+    const isApiPath = url.startsWith('/api/') || url === '/rpc';
+
+    if (!isApiPath) {
+      const handler = this.options.services?.get<StaticFileHandler>('webui.static');
+      if (handler) {
+        try {
+          const handled = await handler(req, res);
+          if (handled) return;
+        } catch (error) {
+          json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+          return;
+        }
+      }
+    }
+
+    // --- Auth required for API routes ---
     if (!this.isAuthorized(req)) {
       json(res, 401, { error: 'Unauthorized' });
       return;
@@ -370,9 +392,10 @@ export class SlashbotGateway {
       return;
     }
 
+    const reqPath = req.url.split('?')[0];
     const route = this.options.routes
       .list()
-      .find((item) => item.method === req.method && item.path === req.url);
+      .find((item) => item.method === req.method && item.path === reqPath);
 
     if (!route) {
       json(res, 404, { error: 'Not found' });

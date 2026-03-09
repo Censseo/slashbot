@@ -31,6 +31,7 @@ import { createPlugin as createTelegram } from './telegram/index.js';
 import { createPlugin as createTranscription } from './transcription/index.js';
 import { createPlugin as createWallet } from './wallet/index.js';
 import { createPlugin as createWebTools } from './web-tools/index.js';
+import { createPlugin as createWebui } from './webui/index.js';
 import { createPlugin as createWhatsApp } from './whatsapp/index.js';
 
 /** Factory function that creates a SlashbotPlugin instance with no arguments. */
@@ -63,6 +64,7 @@ const STATIC_PLUGINS: Record<string, BundledPluginFactory> = {
   transcription: createTranscription,
   wallet: createWallet,
   webTools: createWebTools,
+  webui: createWebui,
   whatsapp: createWhatsApp,
 };
 

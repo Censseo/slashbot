@@ -227,7 +227,8 @@ export class SlashbotKernel {
       methods: this.gatewayMethods,
       routes: this.httpRoutes,
       logger: this.logger,
-      healthProvider: () => this.health()
+      healthProvider: () => this.health(),
+      services: this.services,
     });
     await this.gateway.start();
 
