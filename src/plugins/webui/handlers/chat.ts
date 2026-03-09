@@ -85,7 +85,7 @@ export function createChatHandler(context: PluginRegistrationContext) {
     }
 
     const { message, sessionId: requestedSessionId } = parsed.data;
-    const sessionId = requestedSessionId ?? `web-${randomUUID()}`;
+    const sessionId = requestedSessionId ?? randomUUID();
 
     // Set up abort controller for client disconnect
     const abortController = new AbortController();

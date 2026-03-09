@@ -1,0 +1,150 @@
+/* Base layout */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Chat container */
+[x-data="chat()"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  width: 100%;
+  max-width: 768px;
+  margin: 0 auto;
+  overflow: hidden;
+}
+
+/* Message area — fills available space and scrolls */
+.message-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Message bubbles */
+.message {
+  display: flex;
+  flex-direction: column;
+  max-width: 80%;
+}
+
+.message--user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.message--assistant {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.message__bubble {
+  padding: 0.625rem 0.875rem;
+  border-radius: 1rem;
+  word-break: break-word;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.message--user .message__bubble {
+  background-color: #3b82f6; /* blue-500 */
+  color: #ffffff;
+  border-bottom-right-radius: 0.25rem;
+}
+
+.message--assistant .message__bubble {
+  background-color: #f3f4f6; /* gray-100 */
+  color: #111827; /* gray-900 */
+  border-bottom-left-radius: 0.25rem;
+}
+
+/* Streaming cursor */
+.streaming-cursor::after {
+  content: '|';
+  animation: blink 1s step-start infinite;
+  margin-left: 1px;
+}
+
+/* Thinking indicator: show dots by default, hide static text */
+.thinking-dots {
+  display: flex;
+}
+
+.thinking-static {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streaming-cursor::after {
+    animation: none;
+  }
+
+  /* Hide animated dots, show static text instead */
+  .thinking-dots {
+    display: none;
+  }
+
+  .thinking-static {
+    display: inline;
+  }
+
+  .thinking-dot {
+    animation: none;
+  }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Input area — sticky at bottom */
+.input-area {
+  flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
+  background-color: #ffffff;
+  border-top: 1px solid #e5e7eb; /* gray-200 */
+  padding: 0.75rem 1rem;
+}
+
+/* Responsive breakpoints */
+
+/* Mobile: full-width, no side margins (default above) */
+
+/* Tablet: 768-1023px */
+@media (min-width: 768px) {
+  [x-data="chat()"] {
+    max-width: 100%;
+    padding: 0 1.5rem;
+  }
+}
+
+/* Desktop: centered column */
+@media (min-width: 1024px) {
+  [x-data="chat()"] {
+    max-width: 768px;
+    padding: 0;
+    margin: 0 auto;
+  }
+}
