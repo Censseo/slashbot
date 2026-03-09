@@ -3,7 +3,7 @@
 **Parent Idea**: [idea.md](../idea.md)
 **Feature ID**: 01
 **Priority**: P1/MVP
-**Status**: Not Specified
+**Status**: Specified
 
 ## Summary
 

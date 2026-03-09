@@ -120,7 +120,7 @@ A working chat interface with streaming responses and tool call display, plus a 
 
 | # | Feature | Description | Priority | Dependencies | Status |
 |---|---------|-------------|----------|--------------|--------|
-| 01 | gateway-api | HTTP gateway API exposing slashbot chat and admin endpoints with streaming support | P1/MVP | None | 🔲 Not specified |
+| 01 | gateway-api | HTTP gateway API exposing slashbot chat and admin endpoints with streaming support | P1/MVP | None | 📝 Specified |
 | 02 | chat-ui | Streaming chat interface with tool call visibility using PenguinUI/Alpine.js | P1/MVP | 01 | 🔲 Not specified |
 | 03 | admin-dashboard | Dashboard showing plugin status, live logs, and system health | P1/MVP | 01 | 🔲 Not specified |
 | 04 | conversation-history | Persistent conversation storage and browsing | P2 | 01, 02 | 🔲 Not specified |
