@@ -13,6 +13,7 @@
 | [tui](tui/spec.md) | Terminal UI: OpenTUI panels, command palette, sidebar, themes | Draft |
 | [security](security/spec.md) | Security: permissions, encryption, command safety, wallet protection | Draft |
 | [automation](automation/spec.md) | Automation: scheduling, heartbeat, skills, planning, AI flow authoring, UI access | Active (updated 2026-03-06) |
+| [memory](memory/spec.md) | Memory: knowledge storage, BM25 search, association graph, context injection | Active (updated 2026-03-09) |
 
 ## Legacy Documentation
 
