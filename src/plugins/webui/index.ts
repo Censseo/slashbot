@@ -13,7 +13,6 @@
 import { resolve } from 'node:path';
 import type { SlashbotPlugin, PluginRegistrationContext } from '../../plugin-sdk/index.js';
 import type {
-  PathResolver,
   HealthStatus,
   PluginDiagnostic,
   JsonValue,
@@ -96,8 +95,8 @@ export function createWebuiPlugin(): SlashbotPlugin {
       });
 
       // US4: Static file serving — register as service for gateway fallback
-      const paths = context.getService<PathResolver>('kernel.paths');
-      const assetsDir = paths ? paths.workspace('frontend', 'public') : resolve(process.cwd(), 'frontend', 'public');
+      const workspaceRoot = context.getService<string>('kernel.workspaceRoot');
+      const assetsDir = workspaceRoot ? resolve(workspaceRoot, 'frontend', 'public') : resolve(process.cwd(), 'frontend', 'public');
       const staticHandler = createStaticFileHandler(assetsDir);
       context.registerService({
         id: 'webui.static',
