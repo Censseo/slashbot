@@ -19,20 +19,36 @@
 </head>
 <body class="bg-gray-950 text-gray-100 h-screen flex flex-col overflow-hidden">
 
-  <main class="flex flex-col h-full max-w-3xl w-full mx-auto">
-    <div x-data="chat()" class="flex flex-col h-full relative">
+  <main class="flex flex-col h-full w-full" x-data="{ currentPage: 'chat' }" @navigate-to.window="currentPage = $event.detail" role="main" aria-label="Slashbot application">
 
-      <!-- Header -->
-      <header class="flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-800 bg-gray-950">
-        <h1 class="text-lg font-semibold text-gray-100">Slashbot</h1>
+    <!-- Navigation bar -->
+    <nav class="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-gray-800 bg-gray-950" role="navigation" aria-label="Main navigation">
+      <div class="flex items-center gap-1">
+        <h1 class="text-base font-semibold text-gray-100 mr-4">Slashbot</h1>
         <button
-          @click="showTokenPrompt = true"
-          class="text-xs text-gray-400 hover:text-gray-200 transition-colors px-2 py-1 rounded border border-gray-700 hover:border-gray-500"
-          title="Configure API token"
-        >
-          Token
-        </button>
-      </header>
+          @click="currentPage = 'chat'"
+          class="px-3 py-1.5 text-sm rounded-lg transition-colors"
+          :class="currentPage === 'chat' ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'"
+          :aria-current="currentPage === 'chat' ? 'page' : false"
+        >Chat</button>
+        <button
+          @click="currentPage = 'dashboard'"
+          class="px-3 py-1.5 text-sm rounded-lg transition-colors"
+          :class="currentPage === 'dashboard' ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'"
+          :aria-current="currentPage === 'dashboard' ? 'page' : false"
+        >Dashboard</button>
+      </div>
+      <button
+        @click="$dispatch('show-token-prompt')"
+        class="text-xs text-gray-400 hover:text-gray-200 transition-colors px-2 py-1 rounded border border-gray-700 hover:border-gray-500"
+        title="Configure API token"
+      >Token</button>
+    </nav>
+
+    <!-- Chat View -->
+    <div x-show="currentPage === 'chat'" x-data="chat()" class="flex flex-col h-full relative max-w-3xl w-full mx-auto"
+      @show-token-prompt.window="showTokenPrompt = true"
+    >
 
       <!-- Token input overlay -->
       <div
@@ -104,11 +120,8 @@
 
             <!-- User message -->
             <template x-if="msg.role === 'user'">
-              <div class="max-w-[80%]">
-                <div class="bg-blue-600 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words">
-                  <span x-text="msg.parts[0] && msg.parts[0].text"></span>
-                </div>
-              </div>
+              <div class="bg-blue-600 text-white rounded-xl rounded-tr-sm px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words max-w-[80%]"
+                x-text="msg.parts[0] && msg.parts[0].text"></div>
             </template>
 
             <!-- Assistant message -->
@@ -355,6 +368,166 @@
       </div>
 
     </div>
+
+    <!-- Dashboard View -->
+    <div x-show="currentPage === 'dashboard'" x-data="dashboard()" class="flex flex-col h-full overflow-y-auto"
+      x-effect="if (currentPage === 'dashboard') { onShow() } else { onHide() }"
+    >
+      <div class="max-w-6xl w-full mx-auto px-4 py-6 space-y-6">
+
+        <!-- Error banner -->
+        <div x-show="error" x-transition class="px-3 py-2 bg-red-900/60 border border-red-700 rounded-lg text-sm text-red-300" role="alert">
+          <span x-text="error"></span>
+          <button @click="error = null" class="ml-2 text-red-400 hover:text-red-200">&times;</button>
+        </div>
+
+        <!-- Health Panel (US3) -->
+        <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+          <div class="px-4 py-3 border-b border-gray-800">
+            <h2 class="text-sm font-semibold text-gray-200">System Health</h2>
+          </div>
+          <div class="px-4 py-3">
+            <!-- Metrics row -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+              <div>
+                <div class="text-xs text-gray-500 uppercase tracking-wide">Uptime</div>
+                <div class="text-sm font-medium text-gray-200 mt-0.5" x-text="health ? formatUptime(health.uptime) : '-'"></div>
+              </div>
+              <div>
+                <div class="text-xs text-gray-500 uppercase tracking-wide">Memory</div>
+                <div class="text-sm font-medium text-gray-200 mt-0.5" x-text="health ? formatBytes(health.heapUsed) + ' / ' + formatBytes(health.heapTotal) : '-'"></div>
+              </div>
+              <div>
+                <div class="text-xs text-gray-500 uppercase tracking-wide">Plugins</div>
+                <div class="text-sm font-medium text-gray-200 mt-0.5" x-text="health ? health.pluginsLoaded + ' loaded' : '-'"></div>
+              </div>
+              <div>
+                <div class="text-xs text-gray-500 uppercase tracking-wide">Tools</div>
+                <div class="text-sm font-medium text-gray-200 mt-0.5" x-text="health ? health.toolCount + ' registered' : '-'"></div>
+              </div>
+            </div>
+            <!-- Status indicators -->
+            <template x-if="indicators.length > 0">
+              <div>
+                <div class="text-xs text-gray-500 uppercase tracking-wide mb-2">Services & Connectors</div>
+                <div class="flex flex-wrap gap-3">
+                  <template x-for="ind in indicators" :key="ind.id">
+                    <div class="flex items-center gap-1.5 text-xs text-gray-300">
+                      <span class="indicator-dot" :class="indicatorStatusColor(ind.status)"></span>
+                      <span x-text="ind.label"></span>
+                      <span class="text-gray-600" x-text="'(' + ind.status + ')'"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Plugin Summary Cards -->
+        <div class="grid grid-cols-3 gap-4">
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 text-center">
+            <div class="text-2xl font-bold text-gray-100" x-text="pluginSummary.total"></div>
+            <div class="text-xs text-gray-400 mt-1">Total Plugins</div>
+          </div>
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 text-center">
+            <div class="text-2xl font-bold text-green-400" x-text="pluginSummary.loaded"></div>
+            <div class="text-xs text-gray-400 mt-1">Loaded</div>
+          </div>
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 text-center">
+            <div class="text-2xl font-bold" :class="pluginSummary.failed > 0 ? 'text-red-400' : 'text-gray-400'" x-text="pluginSummary.failed"></div>
+            <div class="text-xs text-gray-400 mt-1">Failed</div>
+          </div>
+        </div>
+
+        <!-- Log Viewer (US2) -->
+        <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+          <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold text-gray-200">Logs</h2>
+              <span class="indicator-dot" :class="isLogConnected ? 'bg-green-500' : 'bg-red-500'" :title="isLogConnected ? 'Connected' : 'Disconnected'"></span>
+              <span x-show="!isLogConnected" class="text-xs text-red-400">Reconnecting...</span>
+            </div>
+            <div class="flex gap-1" role="group" aria-label="Log level filter">
+              <template x-for="level in ['all', 'error', 'warn', 'info', 'debug']" :key="level">
+                <button
+                  @click="logFilter = level"
+                  class="px-2 py-0.5 text-xs rounded transition-colors"
+                  :class="logFilter === level ? 'bg-gray-700 text-gray-100' : 'text-gray-500 hover:text-gray-300'"
+                  x-text="level"
+                  :aria-pressed="logFilter === level"
+                ></button>
+              </template>
+            </div>
+          </div>
+          <div
+            x-ref="logArea"
+            class="h-64 overflow-y-auto px-4 py-2 relative"
+            @scroll="onLogScroll($el)"
+            aria-live="polite"
+            aria-label="Log entries"
+            role="log"
+          >
+            <template x-for="(entry, idx) in filteredLogs" :key="idx">
+              <div class="log-entry">
+                <span class="text-gray-600 flex-shrink-0" x-text="formatTimestamp(entry.ts)"></span>
+                <span class="flex-shrink-0 w-12 text-right uppercase font-bold" :class="logLevelColor(entry.level)" x-text="entry.level"></span>
+                <span class="text-gray-300 flex-1 break-all" x-text="entry.message"></span>
+                <span x-show="entry.fields && Object.keys(entry.fields).length > 0" class="text-gray-600 flex-shrink-0 truncate max-w-xs" x-text="formatFields(entry.fields)"></span>
+              </div>
+            </template>
+            <template x-if="filteredLogs.length === 0">
+              <div class="text-gray-600 text-xs text-center py-4">No log entries</div>
+            </template>
+          </div>
+          <!-- Scroll to bottom indicator -->
+          <div
+            x-show="isUserScrolledUp"
+            @click="scrollToLogBottom()"
+            class="sticky bottom-0 bg-gray-800/90 text-center py-1.5 text-xs text-blue-400 hover:text-blue-300 cursor-pointer border-t border-gray-700"
+          >
+            New entries below — click to scroll down
+          </div>
+        </div>
+
+        <!-- Plugin Table -->
+        <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+          <div class="px-4 py-3 border-b border-gray-800">
+            <h2 class="text-sm font-semibold text-gray-200">Plugins</h2>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm" role="table">
+              <thead>
+                <tr class="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
+                  <th class="px-4 py-2">Plugin ID</th>
+                  <th class="px-4 py-2">Status</th>
+                  <th class="px-4 py-2">Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="plugin in plugins" :key="plugin.pluginId">
+                  <tr class="border-b border-gray-800/50 hover:bg-gray-800/30">
+                    <td class="px-4 py-2.5 font-mono text-gray-200" x-text="plugin.pluginId"></td>
+                    <td class="px-4 py-2.5">
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border"
+                        :class="statusColor(plugin.status)">
+                        <span x-text="statusLabel(plugin.status)"></span>
+                      </span>
+                    </td>
+                    <td class="px-4 py-2.5 text-gray-500 text-xs" x-text="plugin.reason || '-'"></td>
+                  </tr>
+                </template>
+                <template x-if="plugins.length === 0">
+                  <tr><td colspan="3" class="px-4 py-6 text-center text-gray-500">No plugins loaded</td></tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
   </main>
 
   <!-- highlight.js -->
@@ -369,6 +542,7 @@
   <!-- App scripts -->
   <script src="js/sse-client.js"></script>
   <script src="js/chat.js"></script>
+  <script src="js/dashboard.js"></script>
 
   <!-- Alpine.js (must load last, after component definitions) -->
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>

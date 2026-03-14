@@ -145,7 +145,51 @@ function _processLine(line, callbacks) {
   }
 }
 
+/**
+ * Connect to a GET-based SSE log stream using EventSource.
+ *
+ * @param {string} url - The SSE endpoint URL (e.g., /api/logs)
+ * @param {string} token - Bearer token for authentication (sent as query param)
+ * @param {object} callbacks - Event callbacks
+ * @param {function} [callbacks.onLogEntry] - Called with parsed log entry object
+ * @param {function} [callbacks.onError] - Called on connection error
+ * @param {function} [callbacks.onOpen] - Called when connection opens
+ * @param {function} [callbacks.on401] - Called on auth failure
+ * @returns {EventSource} The EventSource instance (call .close() to disconnect)
+ */
+function connectLogStream(url, token, callbacks) {
+  const { onLogEntry, onError, onOpen, on401 } = callbacks || {};
+
+  const separator = url.includes('?') ? '&' : '?';
+  const fullUrl = token ? `${url}${separator}token=${encodeURIComponent(token)}` : url;
+
+  const source = new EventSource(fullUrl);
+
+  source.onopen = () => {
+    if (onOpen) onOpen();
+  };
+
+  source.onmessage = (event) => {
+    if (!event.data) return;
+    try {
+      const entry = JSON.parse(event.data);
+      if (onLogEntry) onLogEntry(entry);
+    } catch {
+      // Malformed data — ignore
+    }
+  };
+
+  source.onerror = (err) => {
+    if (source.readyState === EventSource.CLOSED) {
+      if (on401) on401();
+    }
+    if (onError) onError(err);
+  };
+
+  return source;
+}
+
 // CommonJS export for testability in Bun/Node environments
 if (typeof module !== 'undefined') {
-  module.exports = { streamChat, _processLine };
+  module.exports = { streamChat, _processLine, connectLogStream };
 }

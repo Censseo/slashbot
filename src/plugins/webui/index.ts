@@ -26,6 +26,7 @@ import { createChatHandler } from './handlers/chat.js';
 import { createPluginsHandler } from './handlers/plugins.js';
 import { createLogsHandler } from './handlers/logs.js';
 import { createStaticFileHandler } from './handlers/static.js';
+import { createStatusIndicatorsHandler } from './handlers/status-indicators.js';
 import type { SystemInfo } from './types.js';
 
 function createSystemInfoHandler(context: PluginRegistrationContext) {
@@ -40,6 +41,7 @@ function createSystemInfoHandler(context: PluginRegistrationContext) {
     const diagnostics = getDiagnostics?.() ?? [];
     const channels = getChannels?.() ?? [];
 
+    const mem = process.memoryUsage();
     const info: SystemInfo = {
       version: '0.1.0',
       uptime: Math.floor(process.uptime()),
@@ -48,6 +50,8 @@ function createSystemInfoHandler(context: PluginRegistrationContext) {
       connectorsActive: channels.filter((c) => c.connector).length,
       commandCount: commandsRegistry?.list().length ?? 0,
       toolCount: toolsRegistry?.list().length ?? 0,
+      heapUsed: mem.heapUsed,
+      heapTotal: mem.heapTotal,
     };
 
     return info as unknown as JsonValue;
@@ -92,6 +96,16 @@ export function createWebuiPlugin(): SlashbotPlugin {
         pluginId: 'slashbot.webui',
         description: 'Real-time log streaming via SSE',
         handler: handleLogs,
+      });
+
+      // US6: GET /api/status-indicators — Status indicator query
+      const handleStatusIndicators = createStatusIndicatorsHandler(context);
+      context.registerHttpRoute({
+        method: 'GET',
+        path: '/api/status-indicators',
+        pluginId: 'slashbot.webui',
+        description: 'Status indicator query',
+        handler: handleStatusIndicators,
       });
 
       // US4: Static file serving — register as service for gateway fallback
