@@ -76,4 +76,6 @@ export interface SystemInfo {
   connectorsActive: number;
   commandCount: number;
   toolCount: number;
+  heapUsed: number;
+  heapTotal: number;
 }
