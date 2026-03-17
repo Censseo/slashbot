@@ -7,7 +7,6 @@
  * tool-call-result, done, error.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { randomUUID } from 'node:crypto';
 import type { PluginRegistrationContext, GatewayCallContext, StructuredLogger } from '../../../core/kernel/contracts.js';
 import type { SlashbotKernel } from '../../../core/kernel/kernel.js';
 import type { AuthProfileRouter } from '../../../core/providers/auth-router.js';
@@ -16,11 +15,9 @@ import type { TokenModeProxyAuthService, AgentMessage } from '../../../core/agen
 import type { AgentLoopCallbacks } from '../../../core/agentic/agent-loop.js';
 import { KernelLlmAdapter } from '../../../core/agentic/llm/adapter.js';
 import { ChatRequestSchema } from '../types.js';
+import type { ConversationMessage } from '../types.js';
 import { writeSseHeaders, writeEvent, startKeepalive } from '../sse.js';
-
-// Intentional: uses simple Map instead of SessionManager. Web sessions are ephemeral
-// HTTP-scoped, not persistent conversation sessions.
-const sessions = new Map<string, AgentMessage[]>();
+import type { ConversationStore } from '../services/conversation-store.js';
 
 const BODY_SIZE_LIMIT = 65536;
 
@@ -51,6 +48,9 @@ export function createChatHandler(context: PluginRegistrationContext) {
   if (!providers) throw new Error("webui: required service 'kernel.providers.registry' not available");
 
   const logger = context.getService<StructuredLogger>('kernel.logger') ?? context.logger;
+
+  const conversationStore = context.getService<ConversationStore>('webui.conversations');
+  if (!conversationStore) throw new Error("webui: required service 'webui.conversations' not available");
 
   const llm = new KernelLlmAdapter(
     authRouter,
@@ -85,7 +85,6 @@ export function createChatHandler(context: PluginRegistrationContext) {
     }
 
     const { message, sessionId: requestedSessionId } = parsed.data;
-    const sessionId = requestedSessionId ?? randomUUID();
 
     // Set up abort controller for client disconnect
     const abortController = new AbortController();
@@ -97,7 +96,19 @@ export function createChatHandler(context: PluginRegistrationContext) {
 
     try {
       // Build conversation history
-      const history = sessions.get(sessionId) ?? [];
+      let sessionId: string;
+      let history: AgentMessage[] = [];
+
+      if (requestedSessionId) {
+        sessionId = requestedSessionId;
+        const existing = await conversationStore.get(sessionId);
+        if (existing) {
+          history = existing.messages.map(m => m.msg as unknown as AgentMessage);
+        }
+      } else {
+        const created = await conversationStore.create();
+        sessionId = created.id;
+      }
 
       // Assemble system prompt
       const systemPrompt = await kernel.assemblePrompt();
@@ -159,17 +170,69 @@ export function createChatHandler(context: PluginRegistrationContext) {
         callbacks,
       );
 
-      // Update session history
-      history.push({ role: 'user', content: message });
+      // Persist messages to conversation store
+      const now = new Date().toISOString();
+      const newMessages: ConversationMessage[] = [
+        { ts: now, msg: { role: 'user', content: message } as Record<string, unknown> },
+      ];
       if (result.text) {
-        history.push({ role: 'assistant', content: result.text });
+        newMessages.push({ ts: now, msg: { role: 'assistant', content: result.text } as Record<string, unknown> });
       }
-      // Evict oldest session if over capacity to prevent unbounded memory growth
-      if (!sessions.has(sessionId) && sessions.size > 500) {
-        const oldest = sessions.keys().next().value;
-        if (oldest !== undefined) sessions.delete(oldest);
+      // Include tool call messages from agent loop result if available
+      if (result.messages) {
+        const toolMessages: ConversationMessage[] = result.messages
+          .filter(m => 'toolCalls' in m || m.role === 'tool')
+          .map(m => ({ ts: now, msg: m as unknown as Record<string, unknown> }));
+        if (toolMessages.length > 0) {
+          // Insert tool messages between user and assistant messages
+          newMessages.splice(1, 0, ...toolMessages);
+        }
       }
-      sessions.set(sessionId, history);
+      await conversationStore.append(sessionId, newMessages);
+
+      // Fire-and-forget title generation on first exchange
+      if (!requestedSessionId) {
+        const titleAdapter = {
+          complete: async (prompt: string) => {
+            const titleResult = await llm.complete(
+              {
+                sessionId: `title-${sessionId}`,
+                agentId: 'webui-title',
+                messages: [
+                  { role: 'system', content: 'You are a concise title generator. Reply with ONLY the title.' },
+                  { role: 'user', content: prompt },
+                ],
+                noTools: true,
+                maxTokens: 30,
+                maxSteps: 1,
+              },
+              {},
+            );
+            return titleResult.text ?? '';
+          },
+        };
+        conversationStore.generateTitle(sessionId, titleAdapter).then(title => {
+          if (title && !res.writableEnded) {
+            writeEvent(res, {
+              type: 'conversation-update' as const,
+              payload: { id: sessionId, title, updatedAt: new Date().toISOString() },
+            });
+          }
+        }).catch(() => { /* title generation failure is non-critical */ });
+      }
+
+      // Update preview with last assistant text
+      if (result.text) {
+        const preview = result.text.slice(0, 100);
+        conversationStore.updatePreview(sessionId, preview).catch(() => {});
+      }
+
+      if (!res.writableEnded) {
+        writeEvent(res, {
+          type: 'conversation-update' as const,
+          payload: { id: sessionId, updatedAt: now },
+        });
+      }
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         return;

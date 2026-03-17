@@ -47,6 +47,17 @@ const GatewayRequestSchema = z.object({
   requestId: z.string().optional(),
 });
 
+/**
+ * Match a route pattern (e.g. `/api/conversations/:id`) against a request path.
+ * Supports `:param` segments as wildcards that match any single path segment.
+ */
+function matchRoutePath(pattern: string, reqPath: string): boolean {
+  const patternParts = pattern.split('/');
+  const reqParts = reqPath.split('/');
+  if (patternParts.length !== reqParts.length) return false;
+  return patternParts.every((part, i) => part.startsWith(':') || part === reqParts[i]);
+}
+
 /** Handler signature for static file serving fallback. */
 export type StaticFileHandler = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
 
@@ -395,7 +406,7 @@ export class SlashbotGateway {
     const reqPath = req.url.split('?')[0];
     const route = this.options.routes
       .list()
-      .find((item) => item.method === req.method && item.path === reqPath);
+      .find((item) => item.method === req.method && matchRoutePath(item.path, reqPath));
 
     if (!route) {
       json(res, 404, { error: 'Not found' });
