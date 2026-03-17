@@ -123,7 +123,7 @@ A working chat interface with streaming responses and tool call display, plus a 
 | 01 | gateway-api | HTTP gateway API exposing slashbot chat and admin endpoints with streaming support | P1/MVP | None | 📝 Specified |
 | 02 | chat-ui | Streaming chat interface with tool call visibility using PenguinUI/Alpine.js | P1/MVP | 01 | 📝 Specified |
 | 03 | admin-dashboard | Dashboard showing plugin status, live logs, and system health | P1/MVP | 01 | 📝 Specified |
-| 04 | conversation-history | Persistent conversation storage and browsing | P2 | 01, 02 | 🔲 Not specified |
+| 04 | conversation-history | Persistent conversation storage and browsing | P2 | 01, 02 | 📝 Specified |
 | 05 | nodered-management | Node-RED flow viewing and management from the web UI | P2 | 01, 03 | 🔲 Not specified |
 | 06 | graph-visualization | Association graph visualization and exploration | P3 | 01, 03 | 🔲 Not specified |
 
