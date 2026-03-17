@@ -1,11 +1,11 @@
 # Web UI Specification
 
-> Source of truth for web UI functionality: gateway API, chat interface, and admin dashboard.
-> Last updated: 2026-03-15
+> Source of truth for web UI functionality: gateway API, chat interface, admin dashboard, and conversation history.
+> Last updated: 2026-03-17
 
 ## Overview
 
-The Web UI provides a browser-based interface to slashbot, consisting of a gateway API layer, a streaming chat interface, and an admin dashboard — all served as a self-contained SPA using Alpine.js and Tailwind CSS (PenguinUI components).
+The Web UI provides a browser-based interface to slashbot, consisting of a gateway API layer, a streaming chat interface, an admin dashboard, and persistent conversation history — all served as a self-contained SPA using Alpine.js and Tailwind CSS (PenguinUI components).
 
 ## Features
 
@@ -101,6 +101,48 @@ The Web UI provides a browser-based interface to slashbot, consisting of a gatew
 
 ---
 
+### Conversation History
+
+> Added: 2026-03-17 | Source: specs/011-conversation-history/
+
+#### User Stories
+
+- **Resume a Past Conversation** (P1): Operator opens the sidebar, sees past conversations with titles and dates, selects one, and the full message history loads — including tool call records — allowing them to continue where they left off.
+- **Start a New Conversation** (P1): Operator clicks "New Conversation" to get an empty chat ready for input. First exchange persists the conversation and triggers title generation.
+- **Auto-Generated Conversation Titles** (P2): Conversations receive a descriptive LLM-generated title (5-8 words) after the first assistant response, displayed in the sidebar via SSE update.
+- **Conversation List with Metadata** (P2): Sidebar shows rich metadata — title, relative date ("just now", "5 minutes ago", "yesterday"), and a 100-char message preview — with progressive loading for 50+ conversations.
+- **Conversation Deletion** (FR-011): Operator can delete a single conversation from the sidebar UI (with confirmation) or via the API.
+
+#### Business Rules
+
+- Each conversation stored as a JSONL file in `~/.slashbot/web-ui/conversations/` with a separate `index.json` for fast sidebar loading.
+- Conversation IDs are UUID v4, matching the existing `sessionId` pattern.
+- Messages stored as `RichMessage[]` from `AgentLoopResult.messages`, preserving full tool call chains (`AgentToolAction` with id, name, args, status, result).
+- Chat handler uses ConversationStore instead of in-memory sessions Map; loads history from disk on resume.
+- Title generation is fire-and-forget async using `KernelLlmAdapter` with `noTools: true`, `maxTokens: 30`, `maxSteps: 1`.
+- Corrupted conversation files are silently skipped in the sidebar with a warning logged; other conversations unaffected.
+- Last-write-wins for concurrent browser tabs; in-memory state preserved even if disk write fails.
+- Conversations persist indefinitely until manually deleted by the operator.
+
+#### API Contracts
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /api/conversations | List all conversations (metadata from index) |
+| GET | /api/conversations/:id | Get full conversation with message history |
+| DELETE | /api/conversations/:id | Delete a single conversation |
+
+> See also: [Gateway API](#gateway-api) for POST /api/chat (now persists to ConversationStore)
+
+#### Key Entities
+
+- **Conversation**: Named sequence of exchanges — ID (UUID v4), title, creation date, last activity date, ordered messages.
+- **ConversationMessage**: Single turn with role (user/assistant), content (text and/or tool call records), timestamp. Stored as RichMessage format.
+- **Tool Call Record**: Tool invocation within an assistant message — tool ID, name, input parameters, execution status, result.
+- **Conversation Index**: Lightweight summary (ID, title, last activity, preview) for fast sidebar loading without reading full JSONL files.
+
+---
+
 ## Cross-Cutting Concerns
 
 ### Authentication
@@ -110,11 +152,12 @@ All API endpoints (except static assets) use bearer token authentication. Token 
 ### Accessibility
 
 - Keyboard navigation (Tab, Enter/Space) for all interactive elements
-- ARIA landmarks, aria-live regions for log entries and status updates
+- Sidebar navigable with arrow keys, Enter to select, Escape to close
+- ARIA landmarks, aria-live regions for log entries, status updates, and conversation loading states
 - Proper table semantics for plugin list
-- 4.5:1 contrast ratio for body text, 3:1 for badges
+- 4.5:1 contrast ratio for body text and conversation titles, 3:1 for badges and preview text
 - Status conveyed by both color and text label
-- Respects `prefers-reduced-motion`
+- Respects `prefers-reduced-motion` (sidebar slide animation)
 
 ### Performance
 
@@ -123,9 +166,14 @@ All API endpoints (except static assets) use bearer token authentication. Token 
 - DOM capped at 1000 log entries; oldest removed
 - High-frequency logs batched for rendering
 - Health refresh < 500ms per cycle (background, non-blocking)
+- Sidebar load < 500ms for 100 conversations (index-based)
+- Conversation load < 1s for 500 messages
+- Message append < 100ms (non-blocking to chat streaming)
+- Title generation < 3s (background, fire-and-forget)
 
 ### Technology Stack
 
-- **Backend**: TypeScript (strict mode) on Bun 1.0+, InversifyJS DI, Vercel AI SDK (streaming), Zod v4
+- **Backend**: TypeScript (strict mode) on Bun 1.0+, InversifyJS DI, Vercel AI SDK (streaming + title generation), Zod v4
 - **Frontend**: HTML/CSS/JavaScript ES2022+, Alpine.js 3.x (CDN), Tailwind CSS (CDN), PenguinUI components, marked + highlight.js (CDN)
+- **Storage**: JSONL per-conversation files + JSON index in `~/.slashbot/web-ui/conversations/`
 - **No build step**: Frontend served as static files
