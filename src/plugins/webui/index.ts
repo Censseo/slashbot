@@ -11,7 +11,7 @@
  * @see {@link createWebuiPlugin} — Plugin factory function
  */
 import { resolve } from 'node:path';
-import type { SlashbotPlugin, PluginRegistrationContext } from '../../plugin-sdk/index.js';
+import type { SlashbotPlugin, PluginRegistrationContext, PathResolver } from '../../plugin-sdk/index.js';
 import type {
   HealthStatus,
   PluginDiagnostic,
@@ -21,12 +21,14 @@ import type {
   ToolDefinition,
   CommandDefinition,
 } from '../../core/kernel/contracts.js';
+import { ConversationStore } from './services/conversation-store.js';
 import type { Registry } from '../../core/kernel/registries.js';
 import { createChatHandler } from './handlers/chat.js';
 import { createPluginsHandler } from './handlers/plugins.js';
 import { createLogsHandler } from './handlers/logs.js';
 import { createStaticFileHandler } from './handlers/static.js';
 import { createStatusIndicatorsHandler } from './handlers/status-indicators.js';
+import { createListConversationsHandler, createGetConversationHandler, createDeleteConversationHandler } from './handlers/conversations.js';
 import type { SystemInfo } from './types.js';
 
 function createSystemInfoHandler(context: PluginRegistrationContext) {
@@ -67,7 +69,21 @@ export function createWebuiPlugin(): SlashbotPlugin {
       main: 'bundled',
       description: 'HTTP API endpoints for the web-based frontend (chat, plugins, logs, static files, RPC)',
     },
-    setup: (context) => {
+    setup: async (context) => {
+      // Conversation store — persistent JSONL storage
+      const paths = context.getService<PathResolver>('kernel.paths');
+      const conversationsDir = paths
+        ? paths.home('web-ui', 'conversations')
+        : resolve(process.cwd(), '.slashbot', 'web-ui', 'conversations');
+      const conversationStore = new ConversationStore(conversationsDir);
+      await conversationStore.init();
+      context.registerService({
+        id: 'webui.conversations',
+        pluginId: 'slashbot.webui',
+        description: 'Persistent conversation storage (JSONL per conversation)',
+        implementation: conversationStore,
+      });
+
       // US1: POST /api/chat — SSE streaming chat
       const handleChat = createChatHandler(context);
       context.registerHttpRoute({
@@ -106,6 +122,34 @@ export function createWebuiPlugin(): SlashbotPlugin {
         pluginId: 'slashbot.webui',
         description: 'Status indicator query',
         handler: handleStatusIndicators,
+      });
+
+      // Conversation CRUD endpoints
+      const handleListConversations = createListConversationsHandler(context);
+      context.registerHttpRoute({
+        method: 'GET',
+        path: '/api/conversations',
+        pluginId: 'slashbot.webui',
+        description: 'List all conversations',
+        handler: handleListConversations,
+      });
+
+      const handleGetConversation = createGetConversationHandler(context);
+      context.registerHttpRoute({
+        method: 'GET',
+        path: '/api/conversations/:id',
+        pluginId: 'slashbot.webui',
+        description: 'Get conversation by ID with full message history',
+        handler: handleGetConversation,
+      });
+
+      const handleDeleteConversation = createDeleteConversationHandler(context);
+      context.registerHttpRoute({
+        method: 'DELETE',
+        path: '/api/conversations/:id',
+        pluginId: 'slashbot.webui',
+        description: 'Delete conversation by ID',
+        handler: handleDeleteConversation,
       });
 
       // US4: Static file serving — register as service for gateway fallback

@@ -133,6 +133,9 @@ function _processLine(line, callbacks) {
         isError: p.success === false || event.isError === true,
       });
       break;
+    case 'conversation-update':
+      if (callbacks.onConversationUpdate) callbacks.onConversationUpdate(p);
+      break;
     case 'done':
       if (onDone) onDone(p.sessionId ?? event.sessionId);
       break;
