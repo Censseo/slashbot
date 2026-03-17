@@ -57,7 +57,7 @@ A working chat interface with streaming responses and tool call display, plus a 
 ### In Scope (Future)
 - Multi-conversation history and persistence
 - Node-RED flow management from the dashboard
-- Association graph visualization
+- Memory visualization dashboard (graph, explorer, timeline, stats, search)
 - Configuration editing from the UI
 - Dark mode / theming
 
@@ -125,7 +125,7 @@ A working chat interface with streaming responses and tool call display, plus a 
 | 03 | admin-dashboard | Dashboard showing plugin status, live logs, and system health | P1/MVP | 01 | 📝 Specified |
 | 04 | conversation-history | Persistent conversation storage and browsing | P2 | 01, 02 | 📝 Specified |
 | 05 | nodered-management | Node-RED flow viewing and management from the web UI | P2 | 01, 03 | 🔲 Not specified |
-| 06 | graph-visualization | Association graph visualization and exploration | P3 | 01, 03 | 🔲 Not specified |
+| 06 | memory-dashboard | Memory visualization dashboard: interactive graph, file explorer, timeline, stats, unified search | P2 | 01, 03 | 🔲 Not specified |
 
 **Status Legend**: 🔲 Not specified → 📝 Specified → ✅ Implemented
 
@@ -137,14 +137,13 @@ A working chat interface with streaming responses and tool call display, plus a 
     │       └── [04-conversation-history]
     └── [03-admin-dashboard]
             ├── [05-nodered-management]
-            └── [06-graph-visualization]
+            └── [06-memory-dashboard]
 ```
 
 ### Implementation Order
 
 1. **Phase 1 (MVP)**: 01-gateway-api, 02-chat-ui, 03-admin-dashboard
-2. **Phase 2**: 04-conversation-history, 05-nodered-management
-3. **Phase 3**: 06-graph-visualization
+2. **Phase 2**: 04-conversation-history, 05-nodered-management, 06-memory-dashboard
 
 ## Open Questions & Risks
 
