@@ -172,3 +172,13 @@ main {
     margin: 0 auto;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .transition-colors,
+  .transition-opacity {
+    transition: none !important;
+  }
+  .animate-spin {
+    animation: none !important;
+  }
+}

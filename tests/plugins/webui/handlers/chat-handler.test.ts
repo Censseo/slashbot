@@ -88,11 +88,23 @@ function makeMockContext(overrides?: Record<string, unknown>) {
     debug: vi.fn(),
   };
 
+  const mockConversationStore = {
+    create: vi.fn().mockResolvedValue({ id: 'mock-conv-id', title: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), preview: null, messageCount: 0 }),
+    get: vi.fn().mockResolvedValue({ metadata: { id: 'mock-conv-id', title: null, messageCount: 0 }, messages: [] }),
+    append: vi.fn().mockResolvedValue(undefined),
+    list: vi.fn().mockResolvedValue([]),
+    delete: vi.fn().mockResolvedValue(true),
+    generateTitle: vi.fn().mockResolvedValue(null),
+    updateTitle: vi.fn().mockResolvedValue(undefined),
+    updatePreview: vi.fn().mockResolvedValue(undefined),
+  };
+
   const services: Record<string, unknown> = {
     'kernel.instance': mockKernel,
     'kernel.authRouter': {},
     'kernel.providers.registry': {},
     'kernel.logger': mockLogger,
+    'webui.conversations': mockConversationStore,
     ...overrides,
   };
 
@@ -203,6 +215,23 @@ describe('createChatHandler', () => {
 
     it('reuses the same session history on second request with same sessionId', async () => {
       const ctx = makeMockContext();
+      // Override the conversation store to return history on second call
+      const mockStore = ctx.getService('webui.conversations') as any;
+      let callCount = 0;
+      mockStore.get.mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return { metadata: { id: '550e8400-e29b-41d4-a716-446655440000' }, messages: [] };
+        }
+        return {
+          metadata: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          messages: [
+            { ts: new Date().toISOString(), msg: { role: 'user', content: 'First' } },
+            { ts: new Date().toISOString(), msg: { role: 'assistant', content: 'Response' } },
+          ],
+        };
+      });
+
       const handler = createChatHandler(ctx as any);
       const sessionId = '550e8400-e29b-41d4-a716-446655440000';
 

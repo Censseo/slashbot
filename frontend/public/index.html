@@ -46,9 +46,78 @@
     </nav>
 
     <!-- Chat View -->
-    <div x-show="currentPage === 'chat'" x-data="chat()" class="flex flex-col h-full relative max-w-3xl w-full mx-auto"
-      @show-token-prompt.window="showTokenPrompt = true"
-    >
+    <div x-show="currentPage === 'chat'" class="flex flex-row h-full overflow-hidden">
+
+      <!-- Sidebar -->
+      <aside x-data="conversations()" @keydown.window="handleKeydown($event)" class="w-64 flex-shrink-0 border-r border-gray-700/50 bg-gray-900/50 flex flex-col overflow-hidden" role="complementary" aria-label="Conversation history">
+
+        <!-- Sidebar header -->
+        <div class="flex items-center justify-between px-3 py-2.5 border-b border-gray-700/50 flex-shrink-0">
+          <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Conversations</span>
+          <button
+            @click="newConversation()"
+            class="flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-700/60 transition-colors"
+            title="New conversation"
+            aria-label="New conversation"
+          >
+            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+        </div>
+
+        <!-- Loading state -->
+        <div x-show="isLoading" class="flex items-center justify-center py-6">
+          <svg class="w-5 h-5 text-gray-500 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+        </div>
+
+        <!-- Empty state -->
+        <div x-show="!isLoading && items.length === 0" class="px-3 py-6 text-center">
+          <p class="text-xs text-gray-500">No conversations yet.</p>
+        </div>
+
+        <!-- Error state -->
+        <div x-show="error" class="px-3 py-2 mx-2 mt-2 bg-red-900/40 border border-red-800/50 rounded text-xs text-red-400" x-text="error"></div>
+
+        <!-- Conversation list -->
+        <div class="flex-1 overflow-y-auto" role="list" aria-live="polite">
+          <template x-for="item in items" :key="item.id">
+            <div class="group relative" role="listitem">
+              <button
+                @click="selectConversation(item.id)"
+                class="w-full text-left px-3 py-2.5 transition-colors hover:bg-gray-800/60"
+                :class="activeId === item.id ? 'bg-gray-800 border-l-2 border-blue-500' : 'border-l-2 border-transparent'"
+                :aria-current="activeId === item.id ? 'true' : undefined"
+              >
+                <div class="text-xs font-medium text-gray-200 truncate pr-5" x-text="getTitle(item)"></div>
+                <div class="flex items-center justify-between mt-0.5 gap-2">
+                  <span class="text-xs text-gray-500 truncate flex-1" x-text="item.preview || ''"></span>
+                  <span class="text-xs text-gray-600 flex-shrink-0" x-text="formatDate(item.updatedAt)"></span>
+                </div>
+              </button>
+              <button
+                @click.stop="deleteConversation(item.id)"
+                class="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded text-gray-600 hover:text-red-400 hover:bg-gray-700/60 opacity-0 group-hover:opacity-100 transition-opacity"
+                title="Delete conversation"
+                aria-label="Delete conversation"
+              >
+                <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </template>
+        </div>
+
+      </aside>
+
+      <!-- Chat panel -->
+      <div x-data="chat()" class="flex flex-col flex-1 min-w-0 relative"
+        @show-token-prompt.window="showTokenPrompt = true"
+      >
 
       <!-- Token input overlay -->
       <div
@@ -98,12 +167,13 @@
       <!-- Message area -->
       <div
         x-ref="messageArea"
-        class="flex-1 overflow-y-auto px-4 py-4 space-y-4"
+        class="flex-1 overflow-y-auto"
         @scroll="isUserScrolledUp = ($el.scrollHeight - $el.scrollTop - $el.clientHeight) > 50"
         aria-live="polite"
         aria-label="Chat messages"
         role="log"
       >
+      <div class="max-w-3xl mx-auto px-4 py-4 space-y-4">
 
         <!-- Empty state -->
         <div
@@ -327,47 +397,51 @@
           </div>
         </template>
 
-      </div>
+      </div><!-- end max-w-3xl -->
+      </div><!-- end messageArea -->
 
       <!-- Input area -->
       <div class="flex-shrink-0 border-t border-gray-800 bg-gray-950 px-4 py-3">
-        <form
-          class="flex items-end gap-2"
-          aria-label="Chat input"
-          @submit.prevent="sendMessage()"
-        >
-          <textarea
-            x-model="inputText"
-            :disabled="isStreaming"
-            placeholder="Message Slashbot…"
-            rows="1"
-            class="flex-1 bg-gray-800 border border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-100 placeholder-gray-500 resize-none overflow-hidden focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
-            style="max-height: 160px; overflow-y: auto;"
-            @keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); sendMessage(); }"
-            @input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 160) + 'px'"
-            aria-label="Message input"
-          ></textarea>
-
-          <button
-            type="submit"
-            :disabled="isStreaming || !inputText.trim()"
-            class="flex-shrink-0 w-11 h-11 flex items-center justify-center bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-950"
-            aria-label="Send message"
+        <div class="max-w-3xl mx-auto">
+          <form
+            class="flex items-end gap-2"
+            aria-label="Chat input"
+            @submit.prevent="sendMessage()"
           >
-            <!-- Send icon -->
-            <svg x-show="!isStreaming" class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-            </svg>
-            <!-- Spinner icon when streaming -->
-            <svg x-show="isStreaming" class="w-5 h-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-            </svg>
-          </button>
-        </form>
+            <textarea
+              x-model="inputText"
+              :disabled="isStreaming"
+              placeholder="Message Slashbot…"
+              rows="1"
+              class="flex-1 bg-gray-800 border border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-100 placeholder-gray-500 resize-none overflow-hidden focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
+              style="max-height: 160px; overflow-y: auto;"
+              @keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); sendMessage(); }"
+              @input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 160) + 'px'"
+              aria-label="Message input"
+            ></textarea>
+
+            <button
+              type="submit"
+              :disabled="isStreaming || !inputText.trim()"
+              class="flex-shrink-0 w-11 h-11 flex items-center justify-center bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-950"
+              aria-label="Send message"
+            >
+              <!-- Send icon -->
+              <svg x-show="!isStreaming" class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+              </svg>
+              <!-- Spinner icon when streaming -->
+              <svg x-show="isStreaming" class="w-5 h-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+              </svg>
+            </button>
+          </form>
+        </div>
       </div>
 
-    </div>
+      </div><!-- end chat panel -->
+    </div><!-- end chat view -->
 
     <!-- Dashboard View -->
     <div x-show="currentPage === 'dashboard'" x-data="dashboard()" class="flex flex-col h-full overflow-y-auto"
@@ -541,6 +615,7 @@
 
   <!-- App scripts -->
   <script src="js/sse-client.js"></script>
+  <script src="js/conversations.js"></script>
   <script src="js/chat.js"></script>
   <script src="js/dashboard.js"></script>
 

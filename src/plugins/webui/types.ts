@@ -47,12 +47,18 @@ export interface DoneEvent {
   payload: { sessionId: string };
 }
 
+export interface ConversationUpdateEvent {
+  type: 'conversation-update';
+  payload: { id: string; title?: string; preview?: string; updatedAt: string };
+}
+
 export type StreamEvent =
   | TextDeltaEvent
   | ToolCallStartEvent
   | ToolCallResultEvent
   | ErrorEvent
-  | DoneEvent;
+  | DoneEvent
+  | ConversationUpdateEvent;
 
 // ---------------------------------------------------------------------------
 // Plugin Status (maps from PluginDiagnostic)
@@ -63,6 +69,34 @@ export interface PluginStatusEntry {
   status: 'loaded' | 'disabled' | 'failed' | 'skipped';
   reason?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Conversation History
+// ---------------------------------------------------------------------------
+
+export const ConversationMetadataSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().max(100).nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  preview: z.string().max(100).nullable(),
+  messageCount: z.number().int().min(0),
+});
+
+export type ConversationMetadata = z.infer<typeof ConversationMetadataSchema>;
+
+export const ConversationMessageSchema = z.object({
+  ts: z.string().datetime(),
+  msg: z.record(z.string(), z.unknown()),
+});
+
+export type ConversationMessage = z.infer<typeof ConversationMessageSchema>;
+
+export const ConversationIndexSchema = z.object({
+  conversations: z.array(ConversationMetadataSchema),
+});
+
+export type ConversationIndex = z.infer<typeof ConversationIndexSchema>;
 
 // ---------------------------------------------------------------------------
 // System Info (RPC response)

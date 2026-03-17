@@ -8,6 +8,10 @@
 // Monotonic counter for collision-free message IDs (T024)
 let _msgIdCounter = 0;
 
+document.addEventListener('alpine:init', () => {
+  Alpine.store('session', { sessionId: null });
+});
+
 function chat() {
   return {
     messages: [],
@@ -41,6 +45,9 @@ function chat() {
         });
         marked.setOptions({ breaks: true, gfm: true });
       }
+
+      window.addEventListener('load-conversation', (e) => this.loadConversation(e.detail));
+      window.addEventListener('new-conversation', () => this.resetConversation());
     },
 
     sendMessage() {
@@ -129,6 +136,8 @@ function chat() {
             });
           }
           this.sessionId = sessionId;
+          Alpine.store('session').sessionId = sessionId;
+          window.dispatchEvent(new CustomEvent('conversation-updated', { detail: { id: sessionId } }));
           this.isStreaming = false;
           this.scrollToBottom();
         },
@@ -143,11 +152,105 @@ function chat() {
           this.error = message;
         },
 
+        onConversationUpdate: (payload) => {
+          // Dispatch to sidebar for reactive title/preview updates
+          window.dispatchEvent(new CustomEvent('conversation-updated', { detail: payload }));
+        },
+
         on401: () => {
           this.showTokenPrompt = true;
           localStorage.removeItem('slashbot_token');
           this.token = '';
         },
+      });
+    },
+
+    async loadConversation(id) {
+      this.sessionId = id;
+      Alpine.store('session').sessionId = id;
+      this.error = null;
+
+      try {
+        const resp = await fetch(`/api/conversations/${id}`, {
+          headers: { 'Authorization': `Bearer ${this.token}` },
+        });
+        if (!resp.ok) {
+          this.error = 'Failed to load conversation';
+          return;
+        }
+        const data = await resp.json();
+        this.messages = [];
+
+        for (const entry of data.messages) {
+          const msg = entry.msg;
+          if (msg.role === 'user') {
+            this.messages.push({
+              id: ++_msgIdCounter,
+              role: 'user',
+              parts: [{ type: 'text', text: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) }],
+              isStreaming: false,
+              error: null,
+            });
+          } else if (msg.role === 'assistant' && !msg.toolCalls) {
+            const text = typeof msg.content === 'string' ? msg.content : '';
+            this.messages.push({
+              id: ++_msgIdCounter,
+              role: 'assistant',
+              parts: [{ type: 'text', rawText: text, text, html: this.renderMarkdown(text) }],
+              isStreaming: false,
+              error: null,
+            });
+          } else if (msg.role === 'assistant' && msg.toolCalls) {
+            // Tool call message — render each tool call as a part
+            const parts = msg.toolCalls.map(tc => ({
+              type: 'tool-call',
+              toolId: tc.id || tc.toolCallId || '',
+              toolName: tc.name || tc.toolName || 'unknown',
+              args: tc.args || {},
+              result: null,
+              success: true,
+            }));
+            this.messages.push({
+              id: ++_msgIdCounter,
+              role: 'assistant',
+              parts,
+              isStreaming: false,
+              error: null,
+            });
+          } else if (msg.role === 'tool') {
+            // Tool result — find the last assistant message with matching tool call and update it
+            for (let i = this.messages.length - 1; i >= 0; i--) {
+              const m = this.messages[i];
+              if (m.role === 'assistant') {
+                const part = m.parts.find(p => p.type === 'tool-call' && p.toolId === msg.toolCallId);
+                if (part) {
+                  part.result = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        // Scroll to bottom after loading
+        this.$nextTick(() => {
+          const el = this.$refs.messageArea;
+          if (el) el.scrollTop = el.scrollHeight;
+        });
+      } catch (e) {
+        this.error = 'Failed to load conversation';
+      }
+    },
+
+    resetConversation() {
+      this.messages = [];
+      this.sessionId = null;
+      Alpine.store('session').sessionId = null;
+      this.error = null;
+      // Focus the input
+      this.$nextTick(() => {
+        const input = this.$refs.messageInput;
+        if (input) input.focus();
       });
     },
 
