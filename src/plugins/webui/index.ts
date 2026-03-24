@@ -29,6 +29,12 @@ import { createLogsHandler } from './handlers/logs.js';
 import { createStaticFileHandler } from './handlers/static.js';
 import { createStatusIndicatorsHandler } from './handlers/status-indicators.js';
 import { createListConversationsHandler, createGetConversationHandler, createDeleteConversationHandler } from './handlers/conversations.js';
+import { createMemoryStatsHandler } from './handlers/memory-stats.js';
+import { createMemorySearchHandler } from './handlers/memory-search.js';
+import { createMemoryFilesHandler } from './handlers/memory-files.js';
+import { createMemoryNotesHandler } from './handlers/memory-notes.js';
+import { createMemoryTimelineHandler } from './handlers/memory-timeline.js';
+import { createMemoryGraphHandler } from './handlers/memory-graph.js';
 import type { SystemInfo } from './types.js';
 
 function createSystemInfoHandler(context: PluginRegistrationContext) {
@@ -150,6 +156,102 @@ export function createWebuiPlugin(): SlashbotPlugin {
         pluginId: 'slashbot.webui',
         description: 'Delete conversation by ID',
         handler: handleDeleteConversation,
+      });
+
+      // --- Memory Dashboard Routes ---
+
+      const handleMemoryStats = createMemoryStatsHandler(context);
+      context.registerHttpRoute({
+        method: 'GET',
+        path: '/api/memory/stats',
+        pluginId: 'slashbot.webui',
+        description: 'Memory and graph statistics',
+        handler: handleMemoryStats,
+      });
+
+      const handleMemorySearch = createMemorySearchHandler(context);
+      context.registerHttpRoute({
+        method: 'GET',
+        path: '/api/memory/search',
+        pluginId: 'slashbot.webui',
+        description: 'Unified memory and graph search',
+        handler: handleMemorySearch,
+      });
+
+      const memoryFiles = createMemoryFilesHandler(context);
+      context.registerHttpRoute({
+        method: 'GET',
+        path: '/api/memory/files',
+        pluginId: 'slashbot.webui',
+        description: 'List memory directory tree',
+        handler: memoryFiles.handleList,
+      });
+      context.registerHttpRoute({
+        method: 'GET',
+        path: '/api/memory/files/*',
+        pluginId: 'slashbot.webui',
+        description: 'Read a memory file',
+        handler: (req, res, ctx) => {
+          const filePath = (req.url || '').replace(/^\/api\/memory\/files\//, '').split('?')[0];
+          return memoryFiles.handleRead(req, res, ctx, decodeURIComponent(filePath));
+        },
+      });
+      context.registerHttpRoute({
+        method: 'PUT',
+        path: '/api/memory/files/*',
+        pluginId: 'slashbot.webui',
+        description: 'Replace a memory file',
+        handler: (req, res, ctx) => {
+          const filePath = (req.url || '').replace(/^\/api\/memory\/files\//, '').split('?')[0];
+          return memoryFiles.handleWrite(req, res, ctx, decodeURIComponent(filePath));
+        },
+      });
+      context.registerHttpRoute({
+        method: 'DELETE',
+        path: '/api/memory/files/*',
+        pluginId: 'slashbot.webui',
+        description: 'Delete a memory file',
+        handler: (req, res, ctx) => {
+          const filePath = (req.url || '').replace(/^\/api\/memory\/files\//, '').split('?')[0];
+          return memoryFiles.handleDelete(req, res, ctx, decodeURIComponent(filePath));
+        },
+      });
+
+      const handleMemoryNotes = createMemoryNotesHandler(context);
+      context.registerHttpRoute({
+        method: 'POST',
+        path: '/api/memory/notes',
+        pluginId: 'slashbot.webui',
+        description: 'Add quick note to today\'s daily file',
+        handler: handleMemoryNotes,
+      });
+
+      const handleMemoryTimeline = createMemoryTimelineHandler(context);
+      context.registerHttpRoute({
+        method: 'GET',
+        path: '/api/memory/timeline',
+        pluginId: 'slashbot.webui',
+        description: 'Timeline of daily notes',
+        handler: handleMemoryTimeline,
+      });
+
+      const memoryGraph = createMemoryGraphHandler(context);
+      context.registerHttpRoute({
+        method: 'GET',
+        path: '/api/memory/graph',
+        pluginId: 'slashbot.webui',
+        description: 'Full graph data',
+        handler: memoryGraph.handleGraph,
+      });
+      context.registerHttpRoute({
+        method: 'GET',
+        path: '/api/memory/graph/neighbors/*',
+        pluginId: 'slashbot.webui',
+        description: 'Graph node neighbors',
+        handler: (req, res, ctx) => {
+          const nodeId = (req.url || '').replace(/^\/api\/memory\/graph\/neighbors\//, '').split('?')[0];
+          return memoryGraph.handleNeighbors(req, res, ctx, decodeURIComponent(nodeId));
+        },
       });
 
       // US4: Static file serving — register as service for gateway fallback

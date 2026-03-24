@@ -103,7 +103,15 @@ export function createChatHandler(context: PluginRegistrationContext) {
         sessionId = requestedSessionId;
         const existing = await conversationStore.get(sessionId);
         if (existing) {
-          history = existing.messages.map(m => m.msg as unknown as AgentMessage);
+          // Only load user/assistant text messages — tool call/result messages
+          // cannot be replayed (they don't match AgentMessage schema)
+          history = existing.messages
+            .filter(m => {
+              const role = (m.msg as Record<string, unknown>).role;
+              const hasToolCalls = 'toolCalls' in (m.msg as Record<string, unknown>);
+              return (role === 'user' || role === 'assistant') && !hasToolCalls;
+            })
+            .map(m => m.msg as unknown as AgentMessage);
         }
       } else {
         const created = await conversationStore.create();

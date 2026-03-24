@@ -113,3 +113,136 @@ export interface SystemInfo {
   heapUsed: number;
   heapTotal: number;
 }
+
+// ---------------------------------------------------------------------------
+// Memory Dashboard — AssociationGraph interface (optional dependency)
+// ---------------------------------------------------------------------------
+
+export interface AssociationGraphLike {
+  getAllNodeIds(): string[];
+  getNode(id: string): GraphNode | undefined;
+  neighbors(nodeId: string, depth?: number, typeFilter?: string): NeighborResult[];
+  nodeCount(): number;
+  /** Internal edge storage — may be a Map<string, GraphEdge>. */
+  edges?: Map<string, GraphEdge> | unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Memory Dashboard — Request Schemas
+// ---------------------------------------------------------------------------
+
+export const SearchQuerySchema = z.object({
+  q: z.string().min(1),
+  limit: z.coerce.number().int().positive().optional().default(20),
+});
+
+export const FileContentSchema = z.object({
+  content: z.string(),
+});
+
+export const QuickNoteSchema = z.object({
+  text: z.string().min(1),
+});
+
+export const TimelineQuerySchema = z.object({
+  days: z.coerce.number().int().positive().optional().default(7),
+  offset: z.coerce.number().int().nonnegative().optional().default(0),
+});
+
+export const NeighborQuerySchema = z.object({
+  depth: z.coerce.number().int().positive().optional().default(1),
+});
+
+// ---------------------------------------------------------------------------
+// Memory Dashboard — Response Types
+// ---------------------------------------------------------------------------
+
+export interface DayCount {
+  date: string;
+  count: number;
+}
+
+export interface GraphStats {
+  nodeCount: number;
+  edgeCount: number;
+  nodeTypeDistribution: Record<string, number>;
+}
+
+export interface CombinedStats {
+  memory: { files: number; chunks: number; indexedAt: string };
+  graph: GraphStats | null;
+  recentActivity: DayCount[];
+}
+
+export interface MemoryFileNode {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  children?: MemoryFileNode[];
+}
+
+export interface MemoryFileContent {
+  path: string;
+  content: string;
+  lastModified: string;
+}
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type?: string;
+  meta?: Record<string, string>;
+  created: string;
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  rel: string;
+  weight: number;
+  created: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export interface MemorySearchHit {
+  path: string;
+  line: number;
+  text: string;
+  score: number;
+}
+
+export interface GraphSearchHit {
+  node: GraphNode;
+  matchedOn: 'label';
+  edges: GraphEdge[];
+}
+
+export interface UnifiedSearchResult {
+  memory: MemorySearchHit[];
+  graph: GraphSearchHit[];
+}
+
+export interface TimelineEntry {
+  timestamp: string;
+  tags: string[];
+  preview: string;
+  content: string;
+}
+
+export interface TimelineDay {
+  date: string;
+  entries: TimelineEntry[];
+}
+
+export interface NeighborResult {
+  id: string;
+  label: string;
+  type?: string;
+  rel: string;
+  weight: number;
+  direction: 'outgoing' | 'incoming';
+}
