@@ -52,6 +52,12 @@ const GatewayRequestSchema = z.object({
  * Supports `:param` segments as wildcards that match any single path segment.
  */
 function matchRoutePath(pattern: string, reqPath: string): boolean {
+  // Wildcard: /api/foo/* matches /api/foo/bar/baz
+  if (pattern.endsWith('/*')) {
+    const prefix = pattern.slice(0, -1); // "/api/foo/"
+    return reqPath.startsWith(prefix);
+  }
+  // Parameterized: /api/foo/:id matches /api/foo/123
   const patternParts = pattern.split('/');
   const reqParts = reqPath.split('/');
   if (patternParts.length !== reqParts.length) return false;
