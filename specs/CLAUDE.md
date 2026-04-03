@@ -47,6 +47,11 @@
 | BASE_RELATIONS | Canonical set of edge relation types: `related_to`, `uses`, `used_by`, `part_of`, `contains`, `depends_on`, `enables`, `contradicts`, `replaces`, `inspired_by`, `chosen_over`, `instance_of` | specs/007-association-graph | — |
 | Graph Expansion | Augmenting BM25 search results with neighbors of the query concept from the association graph, scored at 50% weight | specs/007-association-graph | Neighbor search, Graph-augmented search |
 | memory:upserted | Event fired after a successful `MemoryStore.upsert()`; triggers LLM-based graph extraction | specs/007-association-graph | — |
+| SlashbotRunner | Top-level embedding entry point for agent-service integration. `executeStep(payload): AsyncGenerator<RunnerEvent>`. Stateless between calls; each call is an isolated generator context | docs/runner/spec.md | Runner, EmbeddedRunner |
+| RunnerPlugin | Lightweight step executor interface used only by the runner module for `executeStep` routing. Distinct from `SlashbotPlugin` (the internal extension mechanism) | docs/runner/spec.md | StepPlugin, ExecutorPlugin |
+| StepPayload | Input to `SlashbotRunner.executeStep()`. Required: `stepType`, `prompt`, `model`, `workspacePath`, `credentials`. Optional: `metadata` | docs/runner/spec.md | Payload, Input |
+| RunnerEvent | Discriminated union output from the step iterator: `output_chunk`, `ask_user`, `step_complete`, `error`. Errors are always events — never thrown to callers | docs/runner/spec.md | Event, StepEvent |
+| RUNNER_ERRORS | Error code constants for runner error events: `NO_PLUGIN`, `INVALID_PAYLOAD`, `PLUGIN_ERROR`, `INIT_ERROR` | docs/runner/spec.md | ErrorCodes |
 
 ---
 
@@ -84,6 +89,15 @@
 | MemoryStats | files, chunks, indexedAt | memory/MemoryStore | ACTIVE | memory plugin |
 | NeighborResult | id, label, type, rel, weight, direction ('outgoing'\|'incoming') | memory/AssociationGraph | ACTIVE | memory.related tool |
 | PathStep | node, rel?, direction? | memory/AssociationGraph | ACTIVE | memory.path tool |
+| StepPayload | stepType, prompt, model, workspacePath, credentials, metadata? | docs/runner/ | ACTIVE | SlashbotRunner, RunnerPlugin impls |
+| RunnerEvent | discriminated union: OutputChunkEvent, AskUserEvent, StepCompleteEvent, ErrorEvent | docs/runner/ | ACTIVE | SlashbotRunner, agent-service shim |
+| OutputChunkEvent | type:'output_chunk', content: string, timestamp? | docs/runner/ | ACTIVE | runner consumers |
+| AskUserEvent | type:'ask_user', question: string, callbackId: string, timestamp? | docs/runner/ | ACTIVE | runner consumers |
+| StepCompleteEvent | type:'step_complete', result: string, timestamp? | docs/runner/ | ACTIVE | runner consumers |
+| ErrorEvent | type:'error', message: string, code?: string, timestamp? | docs/runner/ | ACTIVE | runner consumers |
+| RunnerPlugin | stepTypes: readonly string[], execute(payload): AsyncGenerator&lt;RunnerEvent&gt; | docs/runner/ | ACTIVE | Feature 02+ (claude-code plugin) |
+| IPluginRegistry | register, registerDefault, getPlugin | docs/runner/ | ACTIVE | SlashbotRunner |
+| ISlashbotRunner | registry: IPluginRegistry, executeStep(payload): AsyncGenerator&lt;RunnerEvent&gt; | docs/runner/ | ACTIVE | agent-service shim |
 
 ### Entity Relationships
 
@@ -101,6 +115,10 @@ ConnectorRegistry --manages--> ConnectorEntry[] --wraps--> Connector (Telegram, 
 Connector --delegates--> MessageHandler --invokes--> Kernel.handleInput()
 LLMClient --uses--> ProviderRegistry --selects--> Provider (xAI, Anthropic, OpenAI, Google)
 SessionManager --isolates--> ConversationSession --per--> ConnectorSource:channelId
+
+SlashbotRunner --routes-via--> IPluginRegistry --dispatches-to--> RunnerPlugin.execute()
+RunnerPlugin.execute() --yields--> RunnerEvent (output_chunk | ask_user | step_complete | error)
+StepPayload --validated-by--> StepPayloadSchema (Zod) --at--> SlashbotRunner.executeStep() boundary
 ```
 
 ### Shared Entities
@@ -155,6 +173,9 @@ SessionManager --isolates--> ConversationSession --per--> ConnectorSource:channe
 | TYPES (symbols) | Symbol registry for DI tokens | all modules |
 | ActionHandlers | Record of handler functions keyed by action type | core, all plugins |
 | PLATFORM_CONFIGS | Per-platform config (maxMessageLength, supportsMarkdown, conciseMode) | connectors |
+| StepPayload | `{ stepType, prompt, model, workspacePath, credentials, metadata? }` | SlashbotRunner, RunnerPlugin impls, agent-service shim |
+| RunnerEvent | Discriminated union: `OutputChunkEvent \| AskUserEvent \| StepCompleteEvent \| ErrorEvent` | SlashbotRunner, agent-service shim |
+| RUNNER_ERRORS | `{ NO_PLUGIN, INVALID_PAYLOAD, PLUGIN_ERROR, INIT_ERROR }` const | SlashbotRunner, RunnerPlugin impls |
 
 ---
 
@@ -198,6 +219,7 @@ core/di ──> core/events ──> core/config ──> core/actions ──> cor
 | AI Flow Authoring | plugins/nodered | COMPLETE | Flow Management, MCP Bridge | (none) |
 | Memory Store | plugins/memory | COMPLETE | Core | Association Graph |
 | Association Graph | plugins/memory | COMPLETE | Memory Store, LLM Client | (none) |
+| Runner Module | runner | COMPLETE | (none — standalone) | Feature 02 (claude-code plugin), Features 03–06 (Atelier Runner) |
 
 ---
 
@@ -215,6 +237,8 @@ core/di ──> core/events ──> core/config ──> core/actions ──> cor
 | DI-3 | File deletions MUST NOT exceed 80% of original content | SecureFileSystem deletion ratio check | docs/security/spec.md |
 | DI-4 | Plugin metadata.id MUST be unique across all registered plugins | PluginRegistry.registerAll() | docs/plugins/spec.md |
 | DI-5 | SLASHBOT token mint: AtiFyHm6UMNLXCWJGLqhxSwvr3n3MgFKxppkKWUoBAGS | Hardcoded constant | docs/wallet/spec.md |
+| DI-6 | `StepPayload.credentials` values MUST NOT appear in any log output, error message, or stack trace | `SlashbotRunner.executeStep()` error paths | docs/runner/spec.md |
+| DI-7 | `SlashbotRunner` is stateless between calls — no step results, session state, or credentials stored in module scope | Per-call generator context; registry is read-only after startup | docs/runner/spec.md |
 
 ### Workflow Invariants
 
@@ -226,6 +250,9 @@ core/di ──> core/events ──> core/config ──> core/actions ──> cor
 | WI-4 | Connector lock MUST be acquired before starting; fail gracefully if locked | acquireLock() in connectors/locks.ts | docs/connectors/spec.md |
 | WI-5 | Streaming output MUST begin rendering within 200ms of first API chunk | LLM client streaming handler | constitution.md |
 | WI-6 | Plugin initialization (all combined) MUST complete within 2 seconds | PluginRegistry.initAll() timing | constitution.md |
+| WI-7 | `executeStep` MUST yield an `error` RunnerEvent instead of throwing for all failure modes (invalid payload, missing plugin, plugin crash) | try/catch wraps `yield* plugin.execute()` in `SlashbotRunner` | docs/runner/spec.md |
+| WI-8 | Concurrent `executeStep` calls MUST produce isolated event streams — no cross-contamination between steps | Structural isolation via per-call generator context; no shared mutable state | docs/runner/spec.md |
+| WI-9 | `PluginRegistry` is write-once at startup; it MUST NOT be modified during active `executeStep` calls | Read-only contract after agent-service startup sequence | docs/runner/spec.md |
 
 ### Security Invariants
 
@@ -288,5 +315,5 @@ interface ActionResult {
 
 ---
 
-**Last Updated**: 2026-03-09
+**Last Updated**: 2026-04-03
 **Generated by**: `/specforge.learn`

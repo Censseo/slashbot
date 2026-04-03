@@ -267,4 +267,4 @@ These belong in `{module}/CLAUDE.md` instead:
 | Graph-Augmented Search | Full-text BM25 search is extended by exploring graph neighbors of the top query concept and running secondary BM25 passes. Graph-expanded hits are scored at 50% weight and tagged `source: 'graph'`; results are merged and re-ranked before truncation. | memory/MemoryStore | `search(query, limit, graph?, expand?)` |
 | Shared Service Registration | Pure-domain services (no plugin logic) registered under stable string IDs via `context.registerService()` so other plugins can resolve them without direct imports. Pattern enables cross-plugin service sharing without DI container coupling. | memory plugin | `memory.store`, `memory.graph` service IDs |
 
-**Version**: 2.3.0 | **Last Updated**: 2026-03-09 (007-association-graph patterns added)
+**Version**: 2.4.0 | **Last Updated**: 2026-04-03 (013-slashbot-runner-module patterns added)
