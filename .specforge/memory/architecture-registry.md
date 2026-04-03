@@ -46,6 +46,10 @@ New features MUST follow established patterns unless explicitly diverging with d
 | Synthetic Tab for Validation | When LLM omits the tab node from flow `nodes` (because the API creates it implicitly), FlowManager synthesizes a tab node from the `z` field values before validation. Strips tab nodes before the API call. | nodered/FlowManager | `validateFlow()`, `createFlow()`, `updateFlow()` |
 <!-- Added from 005-ai-flow-authoring (2026-03-03) -->
 <!-- Added from 003-nodered-setup-skill (2026-02-19) -->
+| Runner Module (Infrastructure, Not Plugin) | `src/runner/` is a plain TypeScript library (no Plugin interface, no DI container, no kernel init) for embedding slashbot in external Node.js runtimes. Uses `PluginRegistry` (simple Map-based router) separate from `SlashbotPlugin` system. Entry point: `SlashbotRunner.executeStep() → AsyncGenerator<RunnerEvent>`. | runner | `ISlashbotRunner`, `RunnerPlugin`, `IPluginRegistry` |
+| AsyncGenerator Step Isolation | Each `executeStep()` call creates a new generator context with no shared mutable state. Concurrency safety is structural (not synchronized): each call has its own stack and closure, so ≥ 10 concurrent calls are isolated by design. | runner | `SlashbotRunner.executeStep()` |
+| Bun → Node.js CJS Bundle | `bun build --target=node --format=cjs` produces a CommonJS bundle (`dist/runner.cjs`) importable by Node.js 18+ without Bun-specific APIs. Verify with `grep 'Bun\.'` on the output. Pattern: runner module must have zero `Bun.*` namespace usage. | runner | `package.json runner:build` |
+<!-- Added from 013-slashbot-runner-module (2026-04-03) -->
 
 ---
 
