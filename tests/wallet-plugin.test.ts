@@ -30,6 +30,7 @@ async function setupHarness(tempHome?: string): Promise<Harness> {
     registerTool: (tool) => {
       tools.set(tool.id, tool as ToolDefinition);
     },
+    unregisterTool: () => undefined,
     registerCommand: (command) => {
       commands.set(command.id, command);
     },

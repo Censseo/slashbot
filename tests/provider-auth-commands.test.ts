@@ -63,6 +63,7 @@ async function setupProviderAuthCommands(
 
   await plugin.setup({
     registerTool: () => undefined,
+    unregisterTool: () => undefined,
     registerCommand: (command) => {
       commands.set(command.id, command);
     },

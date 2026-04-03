@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "project": {
+      "command": "node",
+      "args": [".mcp/project-server/dist/index.js"]
+    }
+  }
+}

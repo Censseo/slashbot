@@ -105,6 +105,7 @@ function setupPlugin(registryOverride?: MockAgentRegistry): Harness {
 
   plugin.setup({
     registerTool: (tool) => { tools.set(tool.id, tool as ToolDefinition); },
+    unregisterTool: () => undefined,
     registerCommand: () => undefined,
     registerService: (svc) => { services.set((svc as { id: string }).id, (svc as { implementation: unknown }).implementation); },
     registerHook: () => undefined,
@@ -1138,6 +1139,7 @@ describe('orchestrator plugin', () => {
 
       plugin.setup({
         registerTool: (tool) => { tools.set(tool.id, tool as ToolDefinition); },
+        unregisterTool: () => undefined,
         registerCommand: () => undefined,
         registerService: () => undefined,
         registerHook: () => undefined,

@@ -43,6 +43,7 @@ async function setupFsTools(workspaceRoot: string): Promise<Record<string, (args
         tools[tool.id] = (input: unknown) => tool.execute(input as TArgs, {});
       }
     },
+    unregisterTool: () => undefined,
     registerCommand: () => undefined,
     registerHook: () => undefined,
     registerProvider: () => undefined,

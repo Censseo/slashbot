@@ -163,6 +163,9 @@ export function createPluginRegistrationContext(
       assertPluginOwnership(tool.pluginId, pluginId, 'Tool', tool.id);
       deps.tools.register(tool);
     },
+    unregisterTool: (id) => {
+      deps.tools.delete(id);
+    },
     registerCommand: (command) => {
       assertPluginOwnership(command.pluginId, pluginId, 'Command', command.id);
       deps.commands.register(command);

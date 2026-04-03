@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FlowChangePoller, type IFlowPoller } from './FlowChangePoller.js';
 import { McpBridgeService } from './McpBridgeService.js';
 import type { FlowInfo } from '../flow-types.js';
-import type { EventBus } from '@slashbot/core/kernel/event-bus.js';
+import type { EventBus, EventEnvelope } from '@slashbot/core/kernel/event-bus.js';
 
 function makeFlow(id: string, label: string, nodeCount: number): FlowInfo {
   return {
@@ -218,15 +218,15 @@ describe('FlowChangePoller + McpBridgeService integration', () => {
     vi.useFakeTimers();
 
     // Shared event bus (real pub/sub)
-    const subscribers = new Map<string, Set<(data: unknown) => void>>();
+    const subscribers = new Map<string, Set<(event: EventEnvelope) => void>>();
     const eventBus: Pick<EventBus, 'subscribe' | 'publish'> = {
-      subscribe(event: string, handler: (data: unknown) => void) {
+      subscribe(event: string, handler: (event: EventEnvelope) => void) {
         if (!subscribers.has(event)) subscribers.set(event, new Set());
         subscribers.get(event)!.add(handler);
         return () => { subscribers.get(event)?.delete(handler); };
       },
       publish(event: string, data: unknown) {
-        for (const handler of subscribers.get(event) ?? []) handler(data);
+        for (const handler of subscribers.get(event) ?? []) handler(data as EventEnvelope);
       },
     };
 
@@ -277,15 +277,15 @@ describe('FlowChangePoller + McpBridgeService integration', () => {
   it('new flow without mcp- prefix and without mcp:true is ignored', async () => {
     vi.useFakeTimers();
 
-    const subscribers = new Map<string, Set<(data: unknown) => void>>();
+    const subscribers = new Map<string, Set<(event: EventEnvelope) => void>>();
     const eventBus: Pick<EventBus, 'subscribe' | 'publish'> = {
-      subscribe(event: string, handler: (data: unknown) => void) {
+      subscribe(event: string, handler: (event: EventEnvelope) => void) {
         if (!subscribers.has(event)) subscribers.set(event, new Set());
         subscribers.get(event)!.add(handler);
         return () => { subscribers.get(event)?.delete(handler); };
       },
       publish(event: string, data: unknown) {
-        for (const handler of subscribers.get(event) ?? []) handler(data);
+        for (const handler of subscribers.get(event) ?? []) handler(data as EventEnvelope);
       },
     };
 
