@@ -15,6 +15,7 @@
 | [automation](automation/spec.md) | Automation: scheduling, heartbeat, skills, planning, AI flow authoring, UI access | Active (updated 2026-03-06) |
 | [memory](memory/spec.md) | Memory: knowledge storage, BM25 search, association graph, context injection | Active (updated 2026-03-09) |
 | [webui](webui/spec.md) | Web UI: gateway API, chat interface, admin dashboard, conversation history, memory dashboard | Active (updated 2026-04-03) |
+| [runner](runner/spec.md) | Runner embedding API: SlashbotRunner, PluginRegistry, StepPayload, RunnerEvent, Node.js compat | Active (updated 2026-04-03) |
 
 ## Legacy Documentation
 
