@@ -1,7 +1,7 @@
 # Web UI Specification
 
-> Source of truth for web UI functionality: gateway API, chat interface, admin dashboard, and conversation history.
-> Last updated: 2026-03-17
+> Source of truth for web UI functionality: gateway API, chat interface, admin dashboard, conversation history, and memory dashboard.
+> Last updated: 2026-04-03
 
 ## Overview
 
@@ -140,6 +140,55 @@ The Web UI provides a browser-based interface to slashbot, consisting of a gatew
 - **ConversationMessage**: Single turn with role (user/assistant), content (text and/or tool call records), timestamp. Stored as RichMessage format.
 - **Tool Call Record**: Tool invocation within an assistant message — tool ID, name, input parameters, execution status, result.
 - **Conversation Index**: Lightweight summary (ID, title, last activity, preview) for fast sidebar loading without reading full JSONL files.
+
+---
+
+### Memory Dashboard
+
+> Added: 2026-04-03 | Source: specs/012-memory-dashboard/
+
+#### User Stories
+
+- **Explore the Knowledge Graph** (P1): Operator opens the Graph tab to visualize concept relationships as an interactive force-directed graph (Cytoscape.js). Nodes color-coded by type (concept, tool, decision, person, project, domain). Hover highlights direct neighbors; click shows detail panel (label, type, metadata, edges). Filter controls for node types and relationship types. Graceful degradation when AssociationGraph service is unavailable.
+- **Search Across All Memory** (P1): Unified search bar (always visible) queries both memory files (BM25) and graph nodes (substring match on labels). Results grouped by source. Clicking a memory result opens Explorer with that file; clicking a graph result focuses the Graph tab on that node.
+- **Browse and Edit Memory Files** (P2): Explorer tab shows memory directory as a navigable file tree. Click file → markdown-rendered content. Inline editing saves by direct file replace (not via MemoryStore.upsert). Delete with confirmation. "Add Note" appends to today's daily note via appendToday().
+- **Review Recent Activity on Timeline** (P2): Timeline tab shows daily notes in reverse chronological order, grouped by day, with timestamp, tags, and preview. Click entry to expand full content. "Load more" pagination for older entries.
+- **Monitor Memory Statistics** (P3): Persistent stats bar at top of dashboard shows graph node/edge counts, node type distribution, memory file count, chunk count, last indexed timestamp, and 7-day activity trend. Refreshes on tab switch or every 30 seconds.
+
+#### Business Rules
+
+- Memory Dashboard is a new tab in the existing admin dashboard navigation (alongside Chat and Admin tabs).
+- AssociationGraph is an optional runtime dependency — dashboard loads even if the service is absent; Graph tab shows degradation message, graph stats show "N/A".
+- File listing and deletion are handled via direct filesystem operations (MemoryStore.listFiles() is private, no delete method); not routed through MemoryStore.
+- Memory file editing replaces full file content directly; only "Add Note" uses appendToday() (append-style).
+- Search debounced at 300ms minimum to avoid excessive API calls.
+- Graph performance warning shown when node count exceeds 5,000; filters recommended.
+- Path traversal prevention: all file read/write/delete endpoints MUST reject paths outside the configured memory directory.
+
+#### API Contracts
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /api/memory/stats | Memory + graph stats (node/edge counts, file count, last indexed) |
+| GET | /api/memory/search | Unified search across MemoryStore (BM25) and AssociationGraph |
+| GET | /api/memory/files | List memory files as tree structure |
+| GET | /api/memory/files/:path | Read a specific memory file |
+| PUT | /api/memory/files/:path | Update (replace) a memory entry |
+| DELETE | /api/memory/files/:path | Delete a memory entry |
+| POST | /api/memory/notes | Quick note (appendToday) |
+| GET | /api/memory/timeline | Recent daily notes (paginated) |
+| GET | /api/memory/graph | Full graph data (nodes + edges) |
+| GET | /api/memory/graph/neighbors/:id | Node neighbors (with depth param) |
+
+> See also: [Memory spec](/docs/memory/spec.md) for AssociationGraph and MemoryStore internals.
+
+#### Key Entities
+
+- **Memory File**: A file within the memory directory. Has path, content (markdown), metadata (tags, timestamps).
+- **Graph Node**: A concept in the association graph. ID, label, type (concept/tool/decision/person/project/domain), optional metadata, creation date.
+- **Graph Edge**: Directed, weighted relationship between two nodes. Source, target, relationship type, weight (0.0-1.0), creation date.
+- **Search Result**: Unified result from memory search or graph search — source type, display text, relevance, navigation target.
+- **Timeline Entry**: A daily note entry with day grouping, timestamp, tags, preview, and full content.
 
 ---
 

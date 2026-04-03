@@ -14,7 +14,7 @@
 | [security](security/spec.md) | Security: permissions, encryption, command safety, wallet protection | Draft |
 | [automation](automation/spec.md) | Automation: scheduling, heartbeat, skills, planning, AI flow authoring, UI access | Active (updated 2026-03-06) |
 | [memory](memory/spec.md) | Memory: knowledge storage, BM25 search, association graph, context injection | Active (updated 2026-03-09) |
-| [webui](webui/spec.md) | Web UI: gateway API, chat interface, admin dashboard, conversation history | Active (updated 2026-03-17) |
+| [webui](webui/spec.md) | Web UI: gateway API, chat interface, admin dashboard, conversation history, memory dashboard | Active (updated 2026-04-03) |
 
 ## Legacy Documentation
 
