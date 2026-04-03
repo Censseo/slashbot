@@ -43,6 +43,7 @@ async function setupShellExec(workspaceRoot: string): Promise<(args: unknown) =>
         shellExec = (input: unknown) => tool.execute(input as TArgs, {});
       }
     },
+    unregisterTool: () => undefined,
     registerCommand: () => undefined,
     registerHook: () => undefined,
     registerProvider: () => undefined,

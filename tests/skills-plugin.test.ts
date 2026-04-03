@@ -27,6 +27,7 @@ async function setupPlugin(workspaceRoot: string): Promise<TestHarness> {
     registerTool: (tool) => {
       tools.set(tool.id, { execute: tool.execute as never });
     },
+    unregisterTool: () => undefined,
     registerService: () => undefined,
     contributeContextProvider: (provider) => {
       contexts.set(provider.id, { provide: provider.provide });
@@ -62,9 +63,9 @@ describe('skills plugin', () => {
       const runTool = harness.tools.get('skill.run');
       expect(runTool).toBeDefined();
 
-      const result = await runTool!.execute({ name: 'weather' });
+      const result = await runTool!.execute({ name: 'nodered-setup' });
       expect(result.ok).toBe(true);
-      expect(String(result.output)).toContain('[SKILL: weather]');
+      expect(String(result.output)).toContain('[SKILL: nodered-setup]');
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
